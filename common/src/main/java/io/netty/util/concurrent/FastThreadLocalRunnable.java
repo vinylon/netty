@@ -29,10 +29,12 @@ final class FastThreadLocalRunnable implements Runnable {
         try {
             runnable.run();
         } finally {
+            // 任务完成后都会释放资源
             FastThreadLocal.removeAll();
         }
     }
 
+    // 包装成FastThreadLocalRunnable，添加了任务完成释放资源的操作。 保证所有任务执行完成都能够释放资源
     static Runnable wrap(Runnable runnable) {
         return runnable instanceof FastThreadLocalRunnable ? runnable : new FastThreadLocalRunnable(runnable);
     }

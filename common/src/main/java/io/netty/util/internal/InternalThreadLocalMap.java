@@ -62,21 +62,26 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
     public static InternalThreadLocalMap getIfSet() {
         Thread thread = Thread.currentThread();
         if (thread instanceof FastThreadLocalThread) {
+            //快速获取
             return ((FastThreadLocalThread) thread).threadLocalMap();
         }
+        //常规获取
         return slowThreadLocalMap.get();
     }
 
     public static InternalThreadLocalMap get() {
         Thread thread = Thread.currentThread();
         if (thread instanceof FastThreadLocalThread) {
+            // 快速获取 如果是FastThreadLocalThread，则使用自己定义的threadLocalMap
             return fastGet((FastThreadLocalThread) thread);
         } else {
+            // 慢速获取
             return slowGet();
         }
     }
 
     private static InternalThreadLocalMap fastGet(FastThreadLocalThread thread) {
+        // 快方法就是直接获取，获取不到就创建一个设置进去，返回
         InternalThreadLocalMap threadLocalMap = thread.threadLocalMap();
         if (threadLocalMap == null) {
             thread.setThreadLocalMap(threadLocalMap = new InternalThreadLocalMap());
@@ -85,6 +90,7 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
     }
 
     private static InternalThreadLocalMap slowGet() {
+        // 从ThreadLocal中获取，不存在就创建一个，再设置进去，里面可能涉及一堆hash算法，冲突解决，扩容，所以相对就慢啦
         ThreadLocal<InternalThreadLocalMap> slowThreadLocalMap = UnpaddedInternalThreadLocalMap.slowThreadLocalMap;
         InternalThreadLocalMap ret = slowThreadLocalMap.get();
         if (ret == null) {
@@ -94,6 +100,7 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
         return ret;
     }
 
+    // 把线程本地变量的删除，避免内存泄露。
     public static void remove() {
         Thread thread = Thread.currentThread();
         if (thread instanceof FastThreadLocalThread) {
@@ -103,12 +110,16 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
         }
     }
 
+    // ThreadLocal的删除，避免内存泄露。
     public static void destroy() {
         slowThreadLocalMap.remove();
     }
 
+    // 获取索引值，FastThreadLocal构造的时候需要，因为有索引值才可以从数组中获取值啊
     public static int nextVariableIndex() {
+        //获取后自增
         int index = nextIndex.getAndIncrement();
+        //溢出就抛异常了，那也太多了
         if (index < 0) {
             nextIndex.decrementAndGet();
             throw new IllegalStateException("too many thread-local indexed variables");
@@ -125,6 +136,7 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
     public long rp1, rp2, rp3, rp4, rp5, rp6, rp7, rp8, rp9;
 
     private InternalThreadLocalMap() {
+        // 直接定义32个空对象的数组
         super(newIndexedVariableTable());
     }
 
@@ -134,6 +146,8 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
         return array;
     }
 
+    //获取InternalThreadLocalMap已经设置了多少有用对象，不包括UNSET，
+    // 数组中的第0个元素set集合，除了对象数组indexedVariables外，还可能会有其他的属性
     public int size() {
         int count = 0;
 
@@ -179,6 +193,7 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
 
         // We should subtract 1 from the count because the first element in 'indexedVariables' is reserved
         // by 'FastThreadLocal' to keep the list of 'FastThreadLocal's to remove on 'FastThreadLocal.removeAll()'.
+        //第一个是set集合，不算。 这个set集合是待删除的FastThreadLocal
         return count - 1;
     }
 
@@ -286,12 +301,15 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
         this.localChannelReaderStackDepth = localChannelReaderStackDepth;
     }
 
+    // 获取索引对应的值，如果超边界就返回UNSET，表示没设置过值
     public Object indexedVariable(int index) {
         Object[] lookup = indexedVariables;
         return index < lookup.length? lookup[index] : UNSET;
     }
 
     /**
+     * 设置索引和对应的值，如果在范围内，就替换旧值，返回旧值是否是UNSET，是就表示第一次设置，返回true，
+     * 不是就表示更新，返回false。超出范围就扩容。
      * @return {@code true} if and only if a new thread-local variable has been created
      */
     public boolean setIndexedVariable(int index, Object value) {
@@ -301,11 +319,13 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
             lookup[index] = value;
             return oldValue == UNSET;
         } else {
+            // 扩容到大于index的最小的2的幂次，比如index=32，扩容到64，然后把老的数组拷贝到新的数组里去，不满的地方用UNSET填满
             expandIndexedVariableTableAndSet(index, value);
             return true;
         }
     }
 
+    // 扩容到大于index的最小的2的幂次，比如index=32，扩容到64，然后把老的数组拷贝到新的数组里去，不满的地方用UNSET填满
     private void expandIndexedVariableTableAndSet(int index, Object value) {
         Object[] oldArray = indexedVariables;
         final int oldCapacity = oldArray.length;
@@ -323,6 +343,7 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
         indexedVariables = newArray;
     }
 
+    //删除数组中的值并返回，其实就是用UNSET替换了。溢出就返回UNSET
     public Object removeIndexedVariable(int index) {
         Object[] lookup = indexedVariables;
         if (index < lookup.length) {
@@ -334,6 +355,7 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
         }
     }
 
+    // 该数组在索引是否有设置了值
     public boolean isIndexedVariableSet(int index) {
         Object[] lookup = indexedVariables;
         return index < lookup.length && lookup[index] != UNSET;

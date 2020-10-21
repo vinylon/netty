@@ -125,9 +125,11 @@ public class WebSocketServerHandshakerFactory {
      *
      * @return A new WebSocketServerHandshaker for the requested web socket version. Null if web
      *         socket version is not supported.
+     * 根据请求头信息的sec-websocket-version来决定要哪个版本的握手对象，一般都是13，如果都不支持就会返回null
      */
     public WebSocketServerHandshaker newHandshaker(HttpRequest req) {
 
+        //从请求头获取WEBSOCKET版本，根据不同版本，返回不同握手对象 sec-websocket-version
         CharSequence version = req.headers().get(HttpHeaderNames.SEC_WEBSOCKET_VERSION);
         if (version != null) {
             if (version.equals(WebSocketVersion.V13.toHttpHeaderValue())) {
@@ -147,6 +149,7 @@ public class WebSocketServerHandshakerFactory {
             }
         } else {
             // Assume version 00 where version header was not specified
+            //没指定版本的情况
             return new WebSocketServerHandshaker00(webSocketURL, subprotocols, decoderConfig);
         }
     }

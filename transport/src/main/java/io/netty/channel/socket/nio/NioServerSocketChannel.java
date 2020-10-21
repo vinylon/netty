@@ -47,6 +47,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
                              implements io.netty.channel.socket.ServerSocketChannel {
 
     private static final ChannelMetadata METADATA = new ChannelMetadata(false, 16);
+    // 选择器提供器
     private static final SelectorProvider DEFAULT_SELECTOR_PROVIDER = SelectorProvider.provider();
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(NioServerSocketChannel.class);
@@ -59,6 +60,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
              *
              *  See <a href="https://github.com/netty/netty/issues/2308">#2308</a>.
              */
+            // 默认返回sun.nio.ch.ServerSocketChannelImpl
             return provider.openServerSocketChannel();
         } catch (IOException e) {
             throw new ChannelException(
@@ -70,6 +72,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
 
     /**
      * Create a new instance
+     * channelFactory.newChannel()时开始初始化
      */
     public NioServerSocketChannel() {
         this(newSocket(DEFAULT_SELECTOR_PROVIDER));
@@ -86,7 +89,9 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
      * Create a new instance using the given {@link ServerSocketChannel}.
      */
     public NioServerSocketChannel(ServerSocketChannel channel) {
+        // NIO里的SelectionKey.OP_ACCEPT 请求链接
         super(null, channel, SelectionKey.OP_ACCEPT);
+        // 配置信息
         config = new NioServerSocketChannelConfig(this, javaChannel().socket());
     }
 
@@ -119,6 +124,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
 
     @Override
     protected ServerSocketChannel javaChannel() {
+        // 原生通道
         return (ServerSocketChannel) super.javaChannel();
     }
 
@@ -144,10 +150,12 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
 
     @Override
     protected int doReadMessages(List<Object> buf) throws Exception {
+        //进行接收，返回SocketChannel
         SocketChannel ch = SocketUtils.accept(javaChannel());
 
         try {
             if (ch != null) {
+                //创建NioSocketChannel
                 buf.add(new NioSocketChannel(this, ch));
                 return 1;
             }

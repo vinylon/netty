@@ -117,8 +117,11 @@ abstract class SizeClasses implements SizeClassesMetric {
         size2idxTab(size2idxTab);
     }
 
+    //页大小 默认8K
     protected final int pageSize;
+    //1左移多少位得到pageSize，页大小是8k = 1 << 13 所以默认13位
     protected final int pageShifts;
+    //块大小 默认16m
     protected final int chunkSize;
     protected final int directMemoryCacheAlignment;
 

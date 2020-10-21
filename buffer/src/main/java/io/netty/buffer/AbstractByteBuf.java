@@ -65,6 +65,7 @@ public abstract class AbstractByteBuf extends ByteBuf {
         }
     }
 
+    // 泄露检测器
     static final ResourceLeakDetector<ByteBuf> leakDetector =
             ResourceLeakDetectorFactory.instance().newResourceLeakDetector(ByteBuf.class);
 

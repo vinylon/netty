@@ -55,6 +55,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
         super.doBeginRead();
     }
 
+    //这个是专门来处理客户端连接的unsafe
     private final class NioMessageUnsafe extends AbstractNioUnsafe {
 
         private final List<Object> readBuf = new ArrayList<Object>();
@@ -62,9 +63,13 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
         @Override
         public void read() {
             assert eventLoop().inEventLoop();
+            //获取通道的配置
             final ChannelConfig config = config();
+            //获取管道
             final ChannelPipeline pipeline = pipeline();
+            //获取接受缓冲区处理器
             final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+            //重置参数
             allocHandle.reset(config);
 
             boolean closed = false;
@@ -72,16 +77,21 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
             try {
                 try {
                     do {
+                        //读取数据到readBuf
                         int localRead = doReadMessages(readBuf);
+                        //没有消息
                         if (localRead == 0) {
                             break;
                         }
+                        //关闭是-1
                         if (localRead < 0) {
                             closed = true;
                             break;
                         }
 
+                        //读取消息数+1
                         allocHandle.incMessagesRead(localRead);
+                    //是否还要继续读取
                     } while (allocHandle.continueReading());
                 } catch (Throwable t) {
                     exception = t;
@@ -90,10 +100,16 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 int size = readBuf.size();
                 for (int i = 0; i < size; i ++) {
                     readPending = false;
+                    //遍历传播读事件，参数是NioSocketChannel
+                    // 读取连接的数据，封装成NioSocketChannel，然后进行管道的事件传递
+                    // 管道传递读事件，参数就是刚封装的NioSocketChannel，
+                    // 首先调用了通道上下文的invokeChannelRead方法，传入了头上下文head，
+                    // 也就是初始化时候的HeadContext，也就是从头开始传递
                     pipeline.fireChannelRead(readBuf.get(i));
                 }
                 readBuf.clear();
                 allocHandle.readComplete();
+                //传播读完成事件
                 pipeline.fireChannelReadComplete();
 
                 if (exception != null) {
@@ -115,6 +131,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
                 //
                 // See https://github.com/netty/netty/issues/2254
+                //不自动读了，就删除读事件监听，一般读完成后，都设置成自动读的
                 if (!readPending && !config.isAutoRead()) {
                     removeReadOp();
                 }

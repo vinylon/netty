@@ -63,6 +63,7 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
                                     boolean addTaskWakesUp, Queue<Runnable> taskQueue, Queue<Runnable> tailTaskQueue,
                                     RejectedExecutionHandler rejectedExecutionHandler) {
         super(parent, executor, addTaskWakesUp, taskQueue, rejectedExecutionHandler);
+        // 尾队列
         tailTasks = ObjectUtil.checkNotNull(tailTaskQueue, "tailTaskQueue");
     }
 
@@ -78,12 +79,15 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
 
     @Override
     public ChannelFuture register(Channel channel) {
+        // 初始化一个DefaultChannelPromise，封装通道和NioEventLoop
+        // DefaultChannelPromise是对Future做了加强，也是异步回调，可以设置很多监听，也可以将结果写入
         return register(new DefaultChannelPromise(channel, this));
     }
 
     @Override
     public ChannelFuture register(final ChannelPromise promise) {
         ObjectUtil.checkNotNull(promise, "promise");
+        // 最后到了AbstractChannel的内部类AbstractUnsafe的注册方法
         promise.channel().unsafe().register(this, promise);
         return promise;
     }

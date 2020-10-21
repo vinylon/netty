@@ -94,26 +94,37 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 ((SocketChannelConfig) config).isAllowHalfClosure();
     }
 
+    //专门来处理客户端读数据的
     protected class NioByteUnsafe extends AbstractNioUnsafe {
 
+        //涉及一个半关闭的概念，简单点就是说我们客户端和服务端的socket其实都有两个缓冲区，
+        // 即读缓冲区和写缓冲区，如果TCP要分手了，客户端就会先发送关闭请求，
+        // 然后把写缓冲区关闭了，就不写了，但是这个时候他是可以读客户端的消息的，即读缓冲区还没关，所以叫做半关闭。
+        // 所以这里就是判断是否是把读缓冲区关了，
+        // 如果关了，就直接传递自定义消息，否则就判断是否配置了半关闭，
+        // 是的话就进行读关闭，传递自定义消息，否则就关闭通道了
         private void closeOnRead(ChannelPipeline pipeline) {
-            if (!isInputShutdown0()) {
-                if (isAllowHalfClosure(config())) {
-                    shutdownInput();
+            if (!isInputShutdown0()) {//单方关闭输出流，但是可以接受输入，即半关闭
+                if (isAllowHalfClosure(config())) {//是否配置了半关闭
+                    shutdownInput();//关闭输入流
                     pipeline.fireUserEventTriggered(ChannelInputShutdownEvent.INSTANCE);
                 } else {
                     close(voidPromise());
                 }
             } else {
                 inputClosedSeenErrorOnRead = true;
+                //传递自定义事件
                 pipeline.fireUserEventTriggered(ChannelInputShutdownReadComplete.INSTANCE);
             }
         }
 
+        //处理读异常
+        //如果出现了读的异常，因为有缓冲区申请在那边，如果缓冲区有数据，那就先把数据传递下去，
+        // 否则就直接释放，然后还是按普通逻辑去统计，传递读完成事件，最后传递异常事件。
         private void handleReadException(ChannelPipeline pipeline, ByteBuf byteBuf, Throwable cause, boolean close,
                 RecvByteBufAllocator.Handle allocHandle) {
             if (byteBuf != null) {
-                if (byteBuf.isReadable()) {
+                if (byteBuf.isReadable()) {//如果有可读的话，把传递消息
                     readPending = false;
                     pipeline.fireChannelRead(byteBuf);
                 } else {
@@ -121,13 +132,13 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 }
             }
             allocHandle.readComplete();
-            pipeline.fireChannelReadComplete();
-            pipeline.fireExceptionCaught(cause);
+            pipeline.fireChannelReadComplete();//读完成
+            pipeline.fireExceptionCaught(cause);//传递异常
 
             // If oom will close the read event, release connection.
             // See https://github.com/netty/netty/issues/10434
-            if (close || cause instanceof OutOfMemoryError || cause instanceof IOException) {
-                closeOnRead(pipeline);
+            if (close || cause instanceof OutOfMemoryError || cause instanceof IOException) {//如果是IO异常
+                closeOnRead(pipeline);//传递自定义事件
             }
         }
 
@@ -139,6 +150,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 return;
             }
             final ChannelPipeline pipeline = pipeline();
+            //字节缓冲区分配器
             final ByteBufAllocator allocator = config.getAllocator();
             final RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
             allocHandle.reset(config);
@@ -147,27 +159,34 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             boolean close = false;
             try {
                 do {
+                    //分配缓冲区
                     byteBuf = allocHandle.allocate(allocator);
+                    //读取通道内数据到缓冲区，如果是客户端断开，读取数据个数是-1
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
+                    //如果没读到数据0 或者客户端关闭-1
                     if (allocHandle.lastBytesRead() <= 0) {
                         // nothing was read. release the buffer.
                         byteBuf.release();
                         byteBuf = null;
                         close = allocHandle.lastBytesRead() < 0;
                         if (close) {
+                            //把通道关闭，也就是没发数据来
                             // There is nothing left to read as we received an EOF.
                             readPending = false;
                         }
                         break;
                     }
 
+                    //增加读的消息数
                     allocHandle.incMessagesRead(1);
                     readPending = false;
+                    //管道里传递消息
                     pipeline.fireChannelRead(byteBuf);
                     byteBuf = null;
                 } while (allocHandle.continueReading());
 
                 allocHandle.readComplete();
+                //读取完成
                 pipeline.fireChannelReadComplete();
 
                 if (close) {
@@ -182,6 +201,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
                 //
                 // See https://github.com/netty/netty/issues/2254
+                //如果还要继续读的话，就不会删除读监听
                 if (!readPending && !config.isAutoRead()) {
                     removeReadOp();
                 }
@@ -271,17 +291,21 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     protected final Object filterOutboundMessage(Object msg) {
         if (msg instanceof ByteBuf) {
             ByteBuf buf = (ByteBuf) msg;
+            //如果是直接缓冲区就返回
             if (buf.isDirect()) {
                 return msg;
             }
 
+            //否则封装成直接缓冲区就可以零拷贝
             return newDirectBuffer(buf);
         }
 
+        //文件缓冲区也可以零拷贝
         if (msg instanceof FileRegion) {
             return msg;
         }
 
+        //剩下的就不支持了
         throw new UnsupportedOperationException(
                 "unsupported message type: " + StringUtil.simpleClassName(msg) + EXPECTED_TYPES);
     }

@@ -26,6 +26,7 @@ import java.util.Map;
 
 public abstract class TypeParameterMatcher {
 
+    //空类型参数匹配 这个就是任何对象类型都能匹配
     private static final TypeParameterMatcher NOOP = new TypeParameterMatcher() {
         @Override
         public boolean match(Object msg) {
@@ -33,7 +34,10 @@ public abstract class TypeParameterMatcher {
         }
     };
 
+    //会根据传进来得Class对象，判断是哪个类型，从而生成相应的匹配器，
+    // 如果是Object，就是上面的NOOP ，否则就是ReflectiveMatcher
     public static TypeParameterMatcher get(final Class<?> parameterType) {
+        // FastThreadLocal
         final Map<Class<?>, TypeParameterMatcher> getCache =
                 InternalThreadLocalMap.get().typeParameterMatcherGetCache();
 
@@ -50,9 +54,14 @@ public abstract class TypeParameterMatcher {
         return matcher;
     }
 
+    //寻找泛型对应的匹配器
+    //这里首先还是从线程本地变量里获取UnpaddedInternalThreadLocalMap的typeParameterMatcherFindCache，
+    // 然后根据当前对象获取对应的Map<String, TypeParameterMatcher>。
+    // 如果不存在，就用反射来找出泛型的具体类型，最后根据类型返回匹配器，中间还会缓存类型和匹配器的映射关系
     public static TypeParameterMatcher find(
             final Object object, final Class<?> parametrizedSuperclass, final String typeParamName) {
 
+        // 本地变量缓存
         final Map<Class<?>, Map<String, TypeParameterMatcher>> findCache =
                 InternalThreadLocalMap.get().typeParameterMatcherFindCache();
         final Class<?> thisClass = object.getClass();
@@ -72,6 +81,7 @@ public abstract class TypeParameterMatcher {
         return matcher;
     }
 
+    //这个方法基本就是用反射，根据当前对象获取泛型I的真实类型
     private static Class<?> find0(
             final Object object, Class<?> parametrizedSuperclass, String typeParamName) {
 
@@ -149,6 +159,7 @@ public abstract class TypeParameterMatcher {
 
     public abstract boolean match(Object msg);
 
+    //其实就是实现match方法，把相关的类型保存，然后匹配的时候看是否是这个类型的实例
     private static final class ReflectiveMatcher extends TypeParameterMatcher {
         private final Class<?> type;
 

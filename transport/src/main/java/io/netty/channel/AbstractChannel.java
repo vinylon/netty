@@ -70,8 +70,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      */
     protected AbstractChannel(Channel parent) {
         this.parent = parent;
+        //id DefaultChannelId
         id = newId();
+        //创建NioMessageUnsafe，一些底层的操作都是这个来完成的
         unsafe = newUnsafe();
+        //管道 ChannelPipeline类型实例  DefaultChannelPipeline
         pipeline = newChannelPipeline();
     }
 
@@ -416,16 +419,22 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      */
     protected abstract class AbstractUnsafe implements Unsafe {
 
+        //出站字节缓冲区
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
+        //接受数据缓冲分配器的处理器
         private RecvByteBufAllocator.Handle recvHandle;
+        //是否正在缓冲
         private boolean inFlush0;
         /** true if the channel has never been registered, false otherwise */
+        //通道没注册过
         private boolean neverRegistered = true;
 
+        //断言还没注册，或者当前线程是IO线程
         private void assertEventLoop() {
             assert !registered || eventLoop.inEventLoop();
         }
 
+        //接受缓冲区处理器
         @Override
         public RecvByteBufAllocator.Handle recvBufAllocHandle() {
             if (recvHandle == null) {
@@ -449,24 +458,33 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             return remoteAddress0();
         }
 
+        //注册到事件循环
+        // 注册方法其实就是判断是否当前线程就是IO线程，
+        // 是的话就直接执行，
+        // 不是就包装成一个任务提交给IO线程，这样就避免多线程的问题，始终是单线程操作。
         @Override
         public final void register(EventLoop eventLoop, final ChannelPromise promise) {
             ObjectUtil.checkNotNull(eventLoop, "eventLoop");
-            if (isRegistered()) {
+            if (isRegistered()) {//是否已经注册人到一个eventLoop
                 promise.setFailure(new IllegalStateException("registered to an event loop already"));
                 return;
             }
-            if (!isCompatible(eventLoop)) {
+            if (!isCompatible(eventLoop)) {//是否是NioEventLoop类型
                 promise.setFailure(
                         new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
                 return;
             }
 
+            //设置通道的事件循环，1对1，只设置一次
             AbstractChannel.this.eventLoop = eventLoop;
 
+            // 只能当前线程是eventLoop的线程才可以注册，防止多线程并发问题，
+            // 所以即使多线程来操作，也是安全的，会按照一定顺序提交到任务队列里
+            // eventLoop.inEventLoop()就是判断调用这个方法的是不是eventLoop的线程
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
+                // 提交到eventLoop的任务队列
                 try {
                     eventLoop.execute(new Runnable() {
                         @Override
@@ -485,45 +503,55 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
         }
 
+        //这里是注册过程要做的事，进行真正的注册逻辑doRegister，
+        // 其实就是将NIO通道注册到Selector上，然后进行处理器的待添加事件的处理，注册回调成功，
+        // 管道传递注册事件，如果是第一次注册，管道传递通道激活事件，否则是设置自动读的话就注册读监听。
         private void register0(ChannelPromise promise) {
             try {
                 // check if the channel is still open as it could be closed in the mean time when the register
                 // call was outside of the eventLoop
+                //确保是不可取消和通道打开着，否则就返回
                 if (!promise.setUncancellable() || !ensureOpen(promise)) {
                     return;
                 }
+                //设置注册标记
                 boolean firstRegistration = neverRegistered;
-                doRegister();
-                neverRegistered = false;
-                registered = true;
+                doRegister();//进行注册逻辑
+                neverRegistered = false;//AbstractUnsafe的已注册标记
+                registered = true;//channel的已注册标记
 
                 // Ensure we call handlerAdded(...) before we actually notify the promise. This is needed as the
                 // user may already fire events through the pipeline in the ChannelFutureListener.
+                //如果在注册前有处理器添加，还没进行HandlerAdded回调，注册成功后要回调
                 pipeline.invokeHandlerAddedIfNeeded();
 
+                //回调注册成功
                 safeSetSuccess(promise);
+                //通道注册事件传递
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
                 // multiple channel actives if the channel is deregistered and re-registered.
-                if (isActive()) {
-                    if (firstRegistration) {
+                if (isActive()) {//通道激活的话
+                    if (firstRegistration) {//第一次注册要进行激活事件传递
                         pipeline.fireChannelActive();
                     } else if (config().isAutoRead()) {
                         // This channel was registered before and autoRead() is set. This means we need to begin read
                         // again so that we process inbound data.
                         //
                         // See https://github.com/netty/netty/issues/4805
+                        //否则如果设置了自动读，就进行读监听
                         beginRead();
                     }
                 }
             } catch (Throwable t) {
                 // Close the channel directly to avoid FD leak.
-                closeForcibly();
-                closeFuture.setClosed();
-                safeSetFailure(promise, t);
+                closeForcibly();//强制关闭
+                closeFuture.setClosed();//关闭回调
+                safeSetFailure(promise, t);//设置失败
             }
         }
 
+        //看主逻辑，做具体的doBind，如果通道开始没激活，绑定后激活的话，就开一个延时的任务，进行激活事件传递，最后回调绑定成功
         @Override
         public final void bind(final SocketAddress localAddress, final ChannelPromise promise) {
             assertEventLoop();
@@ -554,18 +582,23 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            //绑定前没激活，绑定后激活了
             if (!wasActive && isActive()) {
                 invokeLater(new Runnable() {
                     @Override
                     public void run() {
+                        //激活事件传递
                         pipeline.fireChannelActive();
                     }
                 });
             }
 
+            //回调绑定成功
             safeSetSuccess(promise);
         }
 
+        //调用doDisconnect，断开连接，如果开始激活的，断开后失效了，就传递失效事件。
+        // 如果通道关闭了，还要处理关闭事件closeIfClosed
         @Override
         public final void disconnect(final ChannelPromise promise) {
             assertEventLoop();
@@ -576,29 +609,38 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
             boolean wasActive = isActive();
             try {
+                // 执行断开
                 doDisconnect();
                 // Reset remoteAddress and localAddress
                 remoteAddress = null;
                 localAddress = null;
             } catch (Throwable t) {
+                // 回调断开失败
                 safeSetFailure(promise, t);
+                // 关闭事件
                 closeIfClosed();
                 return;
             }
 
+            //开始激活的，断开后失效了
             if (wasActive && !isActive()) {
                 invokeLater(new Runnable() {
                     @Override
                     public void run() {
+                        // 传递失效事件
                         pipeline.fireChannelInactive();
                     }
                 });
             }
 
+            // 回调断开成功
             safeSetSuccess(promise);
+            // 关闭事件
             closeIfClosed(); // doDisconnect() might have closed the channel
         }
 
+        //关闭通道和出站缓冲区
+        // 进行通道的关闭，主要还是出站缓冲区的处理和传递通道失效和注销事件。
         @Override
         public final void close(final ChannelPromise promise) {
             assertEventLoop();
@@ -611,6 +653,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         /**
          * Shutdown the output portion of the corresponding {@link Channel}.
          * For example this will clean up the {@link ChannelOutboundBuffer} and not allow any more writes.
+         * 出站缓冲区关闭处理
+         * 清理出站缓冲区ChannelOutboundBuffer ，并传递fireUserEventTriggered事件
          */
         @UnstableApi
         public final void shutdownOutput(final ChannelPromise promise) {
@@ -629,17 +673,21 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
-            if (outboundBuffer == null) {
+            if (outboundBuffer == null) {//如果出站缓冲区为null的话，就回调失败
                 promise.setFailure(new ClosedChannelException());
                 return;
             }
+            //禁止添加数据到出站缓冲区了
             this.outboundBuffer = null; // Disallow adding any messages and flushes to outboundBuffer.
 
+            //根据异常创建ChannelOutputShutdownException
             final Throwable shutdownCause = cause == null ?
                     new ChannelOutputShutdownException("Channel output shutdown") :
                     new ChannelOutputShutdownException("Channel output shutdown", cause);
+            //有关闭执行器
             Executor closeExecutor = prepareToClose();
             if (closeExecutor != null) {
+                //提交一个任务
                 closeExecutor.execute(new Runnable() {
                     @Override
                     public void run() {
@@ -651,9 +699,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                             promise.setFailure(err);
                         } finally {
                             // Dispatch to the EventLoop
+                            //出站缓冲区事件任务
                             eventLoop().execute(new Runnable() {
                                 @Override
                                 public void run() {
+                                    //出站缓冲区事件处理
                                     closeOutboundBufferForShutdown(pipeline, outboundBuffer, shutdownCause);
                                 }
                             });
@@ -663,6 +713,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             } else {
                 try {
                     // Execute the shutdown.
+                    //直接处理关闭
                     doShutdownOutput();
                     promise.setSuccess();
                 } catch (Throwable err) {
@@ -675,8 +726,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         private void closeOutboundBufferForShutdown(
                 ChannelPipeline pipeline, ChannelOutboundBuffer buffer, Throwable cause) {
+            //不能冲刷
             buffer.failFlushed(cause, false);
+            //关闭出站缓冲区
             buffer.close(cause, true);
+            //传递事件
             pipeline.fireUserEventTriggered(ChannelOutputShutdownEvent.INSTANCE);
         }
 
@@ -686,13 +740,14 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            //如果已经发起关闭了
             if (closeInitiated) {
-                if (closeFuture.isDone()) {
+                if (closeFuture.isDone()) {//判断是否关闭完成
                     // Closed already.
-                    safeSetSuccess(promise);
+                    safeSetSuccess(promise);//回调
                 } else if (!(promise instanceof VoidChannelPromise)) { // Only needed if no VoidChannelPromise.
                     // This means close() was called before so we just register a listener and return
-                    closeFuture.addListener(new ChannelFutureListener() {
+                    closeFuture.addListener(new ChannelFutureListener() {//如果不是VoidChannelPromise，添加关闭监听
                         @Override
                         public void operationComplete(ChannelFuture future) throws Exception {
                             promise.setSuccess();
@@ -702,8 +757,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            //已经开始关闭了
             closeInitiated = true;
 
+            //处理出站缓冲区关闭
             final boolean wasActive = isActive();
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
             this.outboundBuffer = null; // Disallow adding any messages and flushes to outboundBuffer.
@@ -714,6 +771,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     public void run() {
                         try {
                             // Execute the close.
+                            //具体的关闭逻辑和回调
                             doClose0(promise);
                         } finally {
                             // Call invokeLater so closeAndDeregister is executed in the EventLoop again!
@@ -725,6 +783,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                                         outboundBuffer.failFlushed(cause, notify);
                                         outboundBuffer.close(closeCause);
                                     }
+                                    //传递通道失效和注销事件
                                     fireChannelInactiveAndDeregister(wasActive);
                                 }
                             });
@@ -734,6 +793,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             } else {
                 try {
                     // Close the channel and fail the queued messages in all cases.
+                    //具体的关闭逻辑和回调
                     doClose0(promise);
                 } finally {
                     if (outboundBuffer != null) {
@@ -746,19 +806,23 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     invokeLater(new Runnable() {
                         @Override
                         public void run() {
+                            //传递通道失效和注销事件
                             fireChannelInactiveAndDeregister(wasActive);
                         }
                     });
                 } else {
+                    //传递通道失效和注销事件
                     fireChannelInactiveAndDeregister(wasActive);
                 }
             }
         }
 
+        //具体的关闭逻辑和回调
         private void doClose0(ChannelPromise promise) {
             try {
                 doClose();
                 closeFuture.setClosed();
+                // 回调
                 safeSetSuccess(promise);
             } catch (Throwable t) {
                 closeFuture.setClosed();
@@ -766,6 +830,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
         }
 
+        //传递通道失效和注销事件
         private void fireChannelInactiveAndDeregister(final boolean wasActive) {
             deregister(voidPromise(), wasActive && !isActive());
         }
@@ -807,6 +872,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             //
             // See:
             // https://github.com/netty/netty/issues/4435
+            //提交一个任务，进行注销doDeregister，然后根据情况传递通道失效和注销事件
             invokeLater(new Runnable() {
                 @Override
                 public void run() {
@@ -832,6 +898,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             });
         }
 
+        //判断下条件，准备开始读，真正读的是通道的doBeginRead方法
         @Override
         public final void beginRead() {
             assertEventLoop();
@@ -853,6 +920,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
         }
 
+        //就是write操作最后就是写入出站缓冲区。如果出站缓冲区关闭了，那就无用写了，释放消息即可，
+        // 否则就封装后放入出站缓冲区里，里面是个单链表。
         @Override
         public final void write(Object msg, ChannelPromise promise) {
             assertEventLoop();
@@ -871,7 +940,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
             int size;
             try {
+                //封装成直接缓冲区
                 msg = filterOutboundMessage(msg);
+                //获取缓冲区大小
                 size = pipeline.estimatorHandle().size(msg);
                 if (size < 0) {
                     size = 0;
@@ -882,6 +953,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            //往出站缓冲区添加消息
             outboundBuffer.addMessage(msg, size, promise);
         }
 
@@ -889,18 +961,22 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         public final void flush() {
             assertEventLoop();
 
+            //获得出站缓冲区
             ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
             if (outboundBuffer == null) {
                 return;
             }
 
+            //添加冲刷计数
             outboundBuffer.addFlush();
+            //冲刷
             flush0();
         }
 
         @SuppressWarnings("deprecation")
+        //具体的发送方法，主要是调用通道的doWrite方法，里面才是将数据从通道中发出去
         protected void flush0() {
-            if (inFlush0) {
+            if (inFlush0) {//避免重入
                 // Avoid re-entrance
                 return;
             }
@@ -913,13 +989,13 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             inFlush0 = true;
 
             // Mark all pending write requests as failure if the channel is inactive.
-            if (!isActive()) {
+            if (!isActive()) {//通道失效的话
                 try {
                     // Check if we need to generate the exception at all.
                     if (!outboundBuffer.isEmpty()) {
-                        if (isOpen()) {
+                        if (isOpen()) {//报错并通知
                             outboundBuffer.failFlushed(new NotYetConnectedException(), true);
-                        } else {
+                        } else {//报错不通知
                             // Do not trigger channelWritabilityChanged because the channel is closed already.
                             outboundBuffer.failFlushed(newClosedChannelException(initialCloseCause, "flush0()"), false);
                         }
@@ -957,6 +1033,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
         }
 
+        //创建一个通道关闭异常
         private ClosedChannelException newClosedChannelException(Throwable cause, String method) {
             ClosedChannelException exception =
                     StacklessClosedChannelException.newInstance(AbstractChannel.AbstractUnsafe.class, method);
@@ -966,6 +1043,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             return exception;
         }
 
+        //没干什么事的回调
         @Override
         public final ChannelPromise voidPromise() {
             assertEventLoop();
@@ -973,6 +1051,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             return unsafeVoidPromise;
         }
 
+        //确认通道打开
         protected final boolean ensureOpen(ChannelPromise promise) {
             if (isOpen()) {
                 return true;
@@ -984,6 +1063,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         /**
          * Marks the specified {@code promise} as success.  If the {@code promise} is done already, log a message.
+         * 设置成功回调
          */
         protected final void safeSetSuccess(ChannelPromise promise) {
             if (!(promise instanceof VoidChannelPromise) && !promise.trySuccess()) {
@@ -993,6 +1073,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         /**
          * Marks the specified {@code promise} as failure.  If the {@code promise} is done already, log a message.
+         * 设置失败回调，带异常信息
          */
         protected final void safeSetFailure(ChannelPromise promise, Throwable cause) {
             if (!(promise instanceof VoidChannelPromise) && !promise.tryFailure(cause)) {
@@ -1007,6 +1088,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             close(voidPromise());
         }
 
+        //延时任务
         private void invokeLater(Runnable task) {
             try {
                 // This method is used by outbound operation implementations to trigger an inbound event later.

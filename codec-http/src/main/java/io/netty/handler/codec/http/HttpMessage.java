@@ -23,6 +23,7 @@ package io.netty.handler.codec.http;
  * @see HttpResponse
  * @see HttpRequest
  * @see HttpHeaders
+ * 协议和头信息接口
  */
 public interface HttpMessage extends HttpObject {
 
@@ -34,16 +35,19 @@ public interface HttpMessage extends HttpObject {
 
     /**
      * Returns the protocol version of this {@link HttpMessage}
+     * 协议版本
      */
     HttpVersion protocolVersion();
 
     /**
      * Set the protocol version of this {@link HttpMessage}
+     * 设置协议版本
      */
     HttpMessage setProtocolVersion(HttpVersion version);
 
     /**
      * Returns the headers of this message.
+     * 头信息
      */
     HttpHeaders headers();
 }

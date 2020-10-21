@@ -44,6 +44,7 @@ final class HeapByteBufUtil {
                 (memory[index + 2] & 0xff) << 16;
     }
 
+    //大端取 低位地址取出来的放高位
     static int getInt(byte[] memory, int index) {
         return  (memory[index]     & 0xff) << 24 |
                 (memory[index + 1] & 0xff) << 16 |
@@ -51,6 +52,7 @@ final class HeapByteBufUtil {
                 memory[index + 3] & 0xff;
     }
 
+    //小端取 低位地址取出来的放低位
     static int getIntLE(byte[] memory, int index) {
         return  memory[index]      & 0xff        |
                 (memory[index + 1] & 0xff) << 8  |
@@ -106,6 +108,7 @@ final class HeapByteBufUtil {
         memory[index + 2] = (byte) (value >>> 16);
     }
 
+    //大端设置 高位数据放低位
     static void setInt(byte[] memory, int index, int value) {
         memory[index]     = (byte) (value >>> 24);
         memory[index + 1] = (byte) (value >>> 16);
@@ -113,6 +116,7 @@ final class HeapByteBufUtil {
         memory[index + 3] = (byte) value;
     }
 
+    //小端设置 低位数据放低位
     static void setIntLE(byte[] memory, int index, int value) {
         memory[index]     = (byte) value;
         memory[index + 1] = (byte) (value >>> 8);

@@ -79,20 +79,28 @@ public final class PlatformDependent {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(PlatformDependent.class);
 
+    //最大堆外内存的设置可以根据这个来设置
     private static final Pattern MAX_DIRECT_MEMORY_SIZE_ARG_PATTERN = Pattern.compile(
             "\\s*-XX:MaxDirectMemorySize\\s*=\\s*([0-9]+)\\s*([kKmMgG]?)\\s*$");
 
-    private static final boolean IS_WINDOWS = isWindows0();
-    private static final boolean IS_OSX = isOsx0();
-    private static final boolean IS_J9_JVM = isJ9Jvm0();
+    private static final boolean IS_WINDOWS = isWindows0();//windows
+    private static final boolean IS_OSX = isOsx0();//mac
+    private static final boolean IS_J9_JVM = isJ9Jvm0();//java9
     private static final boolean IS_IVKVM_DOT_NET = isIkvmDotNet0();
 
     private static final boolean MAYBE_SUPER_USER;
 
-    private static final boolean CAN_ENABLE_TCP_NODELAY_BY_DEFAULT = !isAndroid();
+    //设置TCP是否禁止Nagal算法，其实就是看是否是安卓，不是安卓就禁止，
+    // 不开启的话可能会有延迟的，可能你发送的数据太小，不会马上发送，
+    // 要积压一会儿到了阈值才会发送，貌似好像小数据延迟200ms后也会发送，
+    // 一般都会开启，为了低延迟
+    private static final boolean CAN_ENABLE_TCP_NODELAY_BY_DEFAULT = !isAndroid();//非android
 
+    //是否禁用unsafe 如果禁用了会抛异常
     private static final Throwable UNSAFE_UNAVAILABILITY_CAUSE = unsafeUnavailabilityCause0();
     private static final boolean DIRECT_BUFFER_PREFERRED;
+
+    // 最大直接缓冲区大小
     private static final long MAX_DIRECT_MEMORY = maxDirectMemory0();
 
     private static final int MPSC_CHUNK_SIZE =  1024;
@@ -189,8 +197,10 @@ public final class PlatformDependent {
             // only direct to method if we are not running on android.
             // See https://github.com/netty/netty/issues/2604
             if (javaVersion() >= 9) {
+                // 9以上的用CleanerJava9
                 CLEANER = CleanerJava9.isSupported() ? new CleanerJava9() : NOOP;
             } else {
+                // 其他版本用CleanerJava6
                 CLEANER = CleanerJava6.isSupported() ? new CleanerJava6() : NOOP;
             }
         } else {
@@ -1143,6 +1153,7 @@ public final class PlatformDependent {
             @SuppressWarnings("unchecked")
             List<String> vmArgs = (List<String>) runtimeClass.getDeclaredMethod("getInputArguments").invoke(runtime);
             for (int i = vmArgs.size() - 1; i >= 0; i --) {
+                // 这里会判断是否有vm参数设值了
                 Matcher m = MAX_DIRECT_MEMORY_SIZE_ARG_PATTERN.matcher(vmArgs.get(i));
                 if (!m.matches()) {
                     continue;

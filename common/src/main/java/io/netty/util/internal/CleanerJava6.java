@@ -43,12 +43,14 @@ final class CleanerJava6 implements Cleaner {
         Method clean;
         Field cleanerField;
         Throwable error = null;
+        // 容量为1的直接缓冲区
         final ByteBuffer direct = ByteBuffer.allocateDirect(1);
         try {
             Object mayBeCleanerField = AccessController.doPrivileged(new PrivilegedAction<Object>() {
                 @Override
                 public Object run() {
                     try {
+                        //反射获取cleaner属性
                         Field cleanerField =  direct.getClass().getDeclaredField("cleaner");
                         if (!PlatformDependent.hasUnsafe()) {
                             // We need to make it accessible if we do not use Unsafe as we will access it via
@@ -93,8 +95,10 @@ final class CleanerJava6 implements Cleaner {
         } else {
             logger.debug("java.nio.ByteBuffer.cleaner(): unavailable", error);
         }
+        //clear对象
         CLEANER_FIELD = cleanerField;
         CLEANER_FIELD_OFFSET = fieldOffset;
+        //获取clear的clean方法
         CLEAN_METHOD = clean;
     }
 
@@ -145,6 +149,7 @@ final class CleanerJava6 implements Cleaner {
             cleaner = PlatformDependent0.getObject(buffer, CLEANER_FIELD_OFFSET);
         }
         if (cleaner != null) {
+            //调用clean方法
             CLEAN_METHOD.invoke(cleaner);
         }
     }

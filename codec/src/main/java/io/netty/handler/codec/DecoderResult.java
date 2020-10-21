@@ -20,6 +20,7 @@ import io.netty.util.internal.ObjectUtil;
 
 public class DecoderResult {
 
+    // 解码的状态成功，失败，还未完成
     protected static final Signal SIGNAL_UNFINISHED = Signal.valueOf(DecoderResult.class, "UNFINISHED");
     protected static final Signal SIGNAL_SUCCESS = Signal.valueOf(DecoderResult.class, "SUCCESS");
 

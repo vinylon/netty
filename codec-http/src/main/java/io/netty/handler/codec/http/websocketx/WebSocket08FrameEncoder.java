@@ -74,11 +74,17 @@ public class WebSocket08FrameEncoder extends MessageToMessageEncoder<WebSocketFr
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(WebSocket08FrameEncoder.class);
 
+    //连续的frame
     private static final byte OPCODE_CONT = 0x0;
+    //文本frame
     private static final byte OPCODE_TEXT = 0x1;
+    //二进制frame
     private static final byte OPCODE_BINARY = 0x2;
+    //关闭帧
     private static final byte OPCODE_CLOSE = 0x8;
+    //ping
     private static final byte OPCODE_PING = 0x9;
+    //pong
     private static final byte OPCODE_PONG = 0xA;
 
     /**
@@ -130,6 +136,7 @@ public class WebSocket08FrameEncoder extends MessageToMessageEncoder<WebSocketFr
             logger.trace("Encoding WebSocket Frame opCode={} length={}", opcode, length);
         }
 
+        //封装第一个字节
         int b0 = 0;
         if (msg.isFinalFragment()) {
             b0 |= 1 << 7;
@@ -142,20 +149,21 @@ public class WebSocket08FrameEncoder extends MessageToMessageEncoder<WebSocketFr
                     + length);
         }
 
+        //处理长度
         boolean release = true;
         ByteBuf buf = null;
         try {
             int maskLength = maskPayload ? 4 : 0;
-            if (length <= 125) {
+            if (length <= 125) {//长度0-125
                 int size = 2 + maskLength;
                 if (maskPayload || length <= GATHERING_WRITE_THRESHOLD) {
                     size += length;
                 }
-                buf = ctx.alloc().buffer(size);
+                buf = ctx.alloc().buffer(size);//前面2个字节+掩码长度(4字节)+内容长度
                 buf.writeByte(b0);
                 byte b = (byte) (maskPayload ? 0x80 | (byte) length : (byte) length);
                 buf.writeByte(b);
-            } else if (length <= 0xFFFF) {
+            } else if (length <= 0xFFFF) {//内容2字节长度
                 int size = 4 + maskLength;
                 if (maskPayload || length <= GATHERING_WRITE_THRESHOLD) {
                     size += length;
@@ -165,7 +173,7 @@ public class WebSocket08FrameEncoder extends MessageToMessageEncoder<WebSocketFr
                 buf.writeByte(maskPayload ? 0xFE : 126);
                 buf.writeByte(length >>> 8 & 0xFF);
                 buf.writeByte(length & 0xFF);
-            } else {
+            } else {//内容8字节长度
                 int size = 10 + maskLength;
                 if (maskPayload || length <= GATHERING_WRITE_THRESHOLD) {
                     size += length;
@@ -177,6 +185,7 @@ public class WebSocket08FrameEncoder extends MessageToMessageEncoder<WebSocketFr
             }
 
             // Write payload
+            //处理掩码  这里默认服务器返回一般不用掩码，而且这里有一种优化，数据不过不太大的话，就合并成一个缓冲区一起发送
             if (maskPayload) {
                 int random = (int) (Math.random() * Integer.MAX_VALUE);
                 mask = ByteBuffer.allocate(4).putInt(random).array();
@@ -215,6 +224,7 @@ public class WebSocket08FrameEncoder extends MessageToMessageEncoder<WebSocketFr
                 }
                 out.add(buf);
             } else {
+                //可写长度如果大于等于内容大度，就合并成一个就发一次
                 if (buf.writableBytes() >= data.readableBytes()) {
                     // merge buffers as this is cheaper then a gathering write if the payload is small enough
                     buf.writeBytes(data);

@@ -26,10 +26,13 @@ import io.netty.util.UncheckedBooleanSupplier;
  * and also prevents overflow.
  */
 public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessagesRecvByteBufAllocator {
+    //最多读多少个消息
     private volatile int maxMessagesPerRead;
+    //是否停止读的标记
     private volatile boolean respectMaybeMoreData = true;
 
     public DefaultMaxMessagesRecvByteBufAllocator() {
+        //这里设置是只读1个消息
         this(1);
     }
 
@@ -83,24 +86,33 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
 
     /**
      * Focuses on enforcing the maximum messages per read condition for {@link #continueReading()}.
+     * 里面有个一个布尔值判别器，主要是说如果把申请的接收缓冲区填满了，那就说明可能还要读，否则就是不读了，因为数据都填不满缓冲区
      */
     public abstract class MaxMessageHandle implements ExtendedHandle {
         private ChannelConfig config;
+        //每次读的最大消息数
         private int maxMessagePerRead;
+        //总共读了多少次消息
         private int totalMessages;
+        //总共读的字节数
         private int totalBytesRead;
+        //尝试读的字节数
         private int attemptedBytesRead;
+        //上一次读的字节数
         private int lastBytesRead;
         private final boolean respectMaybeMoreData = DefaultMaxMessagesRecvByteBufAllocator.this.respectMaybeMoreData;
+        //一个布尔值判别器
         private final UncheckedBooleanSupplier defaultMaybeMoreSupplier = new UncheckedBooleanSupplier() {
             @Override
             public boolean get() {
+                //是否把缓冲区内可写的空间全填满
                 return attemptedBytesRead == lastBytesRead;
             }
         };
 
         /**
          * Only {@link ChannelConfig#getMaxMessagesPerRead()} is used.
+         * 重置属性
          */
         @Override
         public void reset(ChannelConfig config) {
@@ -109,29 +121,34 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
             totalMessages = totalBytesRead = 0;
         }
 
+        //分配缓冲区
         @Override
         public ByteBuf allocate(ByteBufAllocator alloc) {
             return alloc.ioBuffer(guess());
         }
 
+        //增加接受读消息的数量
         @Override
         public final void incMessagesRead(int amt) {
             totalMessages += amt;
         }
 
+        //保存上一次读取的字节数
         @Override
         public void lastBytesRead(int bytes) {
-            lastBytesRead = bytes;
-            if (bytes > 0) {
-                totalBytesRead += bytes;
+            lastBytesRead = bytes;//记录上次读取的字节数
+            if (bytes > 0) {//先判断后加，0就不加了，将性能提高到极致啊
+                totalBytesRead += bytes;//统计总的字节数
             }
         }
 
+        //获取上一次读取的字节数
         @Override
         public final int lastBytesRead() {
             return lastBytesRead;
         }
 
+        //是否继续读
         @Override
         public boolean continueReading() {
             return continueReading(defaultMaybeMoreSupplier);
@@ -139,16 +156,17 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
 
         @Override
         public boolean continueReading(UncheckedBooleanSupplier maybeMoreDataSupplier) {
-            return config.isAutoRead() &&
-                   (!respectMaybeMoreData || maybeMoreDataSupplier.get()) &&
-                   totalMessages < maxMessagePerRead &&
-                   totalBytesRead > 0;
+            return config.isAutoRead() &&//配置了自动读
+                   (!respectMaybeMoreData || maybeMoreDataSupplier.get()) &&//如果还有可读的，或者把缓冲区可写的全填满了
+                   totalMessages < maxMessagePerRead &&//没超过最大读取消息数
+                   totalBytesRead > 0;//已经有数据读取
         }
 
         @Override
         public void readComplete() {
         }
 
+        //尝试读取的尺寸，默认是缓冲区可写的尺寸
         @Override
         public int attemptedBytesRead() {
             return attemptedBytesRead;
@@ -159,6 +177,7 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
             attemptedBytesRead = bytes;
         }
 
+        //总读的大小
         protected final int totalBytesRead() {
             return totalBytesRead < 0 ? Integer.MAX_VALUE : totalBytesRead;
         }

@@ -24,11 +24,14 @@ import io.netty.util.internal.ReferenceCountUpdater;
  * Abstract base class for {@link ByteBuf} implementations that count references.
  */
 public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
+    //refCnt属性的内存偏移地址
     private static final long REFCNT_FIELD_OFFSET =
             ReferenceCountUpdater.getUnsafeOffset(AbstractReferenceCountedByteBuf.class, "refCnt");
+    //原子更新器
     private static final AtomicIntegerFieldUpdater<AbstractReferenceCountedByteBuf> AIF_UPDATER =
             AtomicIntegerFieldUpdater.newUpdater(AbstractReferenceCountedByteBuf.class, "refCnt");
 
+    //引用更新器
     private static final ReferenceCountUpdater<AbstractReferenceCountedByteBuf> updater =
             new ReferenceCountUpdater<AbstractReferenceCountedByteBuf>() {
         @Override
@@ -43,6 +46,7 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
 
     // Value might not equal "real" reference count, all access should be via the updater
     @SuppressWarnings("unused")
+    // 初始值
     private volatile int refCnt = updater.initialValue();
 
     protected AbstractReferenceCountedByteBuf(int maxCapacity) {
@@ -53,11 +57,13 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
     boolean isAccessible() {
         // Try to do non-volatile read for performance as the ensureAccessible() is racy anyway and only provide
         // a best-effort guard.
+        //是否还能用，释放了就不能用了
         return updater.isLiveNonVolatile(this);
     }
 
     @Override
     public int refCnt() {
+        //获取真实引用计数
         return updater.refCnt(this);
     }
 
@@ -65,6 +71,7 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
      * An unsafe operation intended for use by a subclass that sets the reference count of the buffer directly
      */
     protected final void setRefCnt(int refCnt) {
+        // 直接设置真实引用计数
         updater.setRefCnt(this, refCnt);
     }
 
@@ -72,21 +79,25 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
      * An unsafe operation intended for use by a subclass that resets the reference count of the buffer to 1
      */
     protected final void resetRefCnt() {
+        // 重新设置真实计数
         updater.resetRefCnt(this);
     }
 
     @Override
     public ByteBuf retain() {
+        //真实计数+1
         return updater.retain(this);
     }
 
     @Override
     public ByteBuf retain(int increment) {
+        //真实计数+increment
         return updater.retain(this, increment);
     }
 
     @Override
     public ByteBuf touch() {
+        //获取当前对象
         return this;
     }
 
@@ -97,6 +108,7 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
 
     @Override
     public boolean release() {
+        //外部可以调用的尝试释放资源，内部是用引用更新器来判断的
         return handleRelease(updater.release(this));
     }
 
@@ -105,6 +117,7 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
         return handleRelease(updater.release(this, decrement));
     }
 
+    //真正返回才去释放
     private boolean handleRelease(boolean result) {
         if (result) {
             deallocate();
@@ -113,6 +126,7 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
     }
 
     /**
+     *  一旦真实计数为0就释放资源
      * Called once {@link #refCnt()} is equals 0.
      */
     protected abstract void deallocate();

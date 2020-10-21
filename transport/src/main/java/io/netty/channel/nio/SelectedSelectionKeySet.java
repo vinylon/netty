@@ -23,6 +23,7 @@ import java.util.NoSuchElementException;
 
 final class SelectedSelectionKeySet extends AbstractSet<SelectionKey> {
 
+    // 数组存keys
     SelectionKey[] keys;
     int size;
 

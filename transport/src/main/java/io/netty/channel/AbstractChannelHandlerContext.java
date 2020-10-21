@@ -104,8 +104,11 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     AbstractChannelHandlerContext(DefaultChannelPipeline pipeline, EventExecutor executor,
                                   String name, Class<? extends ChannelHandler> handlerClass) {
         this.name = ObjectUtil.checkNotNull(name, "name");
+        // 管道
         this.pipeline = pipeline;
+        // 执行器
         this.executor = executor;
+        // 创建mark缓存
         this.executionMask = mask(handlerClass);
         // Its ordered if its driven by the EventLoop or the given Executor is an instanceof OrderedEventExecutor.
         ordered = executor == null || executor instanceof OrderedEventExecutor;
@@ -359,11 +362,15 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     }
 
     static void invokeChannelRead(final AbstractChannelHandlerContext next, Object msg) {
+        //看msg是不是引用计数接口ReferenceCounted类型，不是就直接返回msg，其实是做资源泄露检测
         final Object m = next.pipeline.touch(ObjectUtil.checkNotNull(msg, "msg"), next);
+        //获取next的执行器，如果为null就是通道的NioEventLoop
         EventExecutor executor = next.executor();
         if (executor.inEventLoop()) {
+            //如果执行器线程就是当前线程，就调用invokeChannelRead，传入NioSocketChannel
             next.invokeChannelRead(m);
         } else {
+            //否则给executor提交任务
             executor.execute(new Runnable() {
                 @Override
                 public void run() {
@@ -374,13 +381,16 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     }
 
     private void invokeChannelRead(Object msg) {
+        //是否已经被添加到管道
         if (invokeHandler()) {
             try {
+                //调用处理器的channelRead方法
                 ((ChannelInboundHandler) handler()).channelRead(this, msg);
             } catch (Throwable t) {
                 invokeExceptionCaught(t);
             }
         } else {
+            //直接传递到下一个可以处理消息的通道上下文
             fireChannelRead(msg);
         }
     }
@@ -665,11 +675,15 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     @Override
     public ChannelHandlerContext read() {
+        //从尾到头找到一个出站的读，开始初始化的时候next就是head，如果你自定了，没处理好的话，可能后面就读不到数据了
+        // 也就是最后会回到head.read
         final AbstractChannelHandlerContext next = findContextOutbound(MASK_READ);
         EventExecutor executor = next.executor();
         if (executor.inEventLoop()) {
+            //如果是同一个线程，就开始读
             next.invokeRead();
         } else {
+            //否则就添加一个任务
             Tasks tasks = next.invokeTasks;
             if (tasks == null) {
                 next.invokeTasks = tasks = new Tasks(next);
@@ -781,17 +795,21 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             throw e;
         }
 
+        //获取前一个符合的出站的上下文
         final AbstractChannelHandlerContext next = findContextOutbound(flush ?
                 (MASK_WRITE | MASK_FLUSH) : MASK_WRITE);
         final Object m = pipeline.touch(msg, next);
         EventExecutor executor = next.executor();
         if (executor.inEventLoop()) {
             if (flush) {
+                //写并且冲刷
                 next.invokeWriteAndFlush(m, promise);
             } else {
+                //写
                 next.invokeWrite(m, promise);
             }
         } else {
+            //提交任务
             final WriteTask task = WriteTask.newInstance(next, m, promise, flush);
             if (!safeExecute(executor, task, promise, m, !flush)) {
                 // We failed to submit the WriteTask. We need to cancel it so we decrement the pending bytes
@@ -878,6 +896,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         EventExecutor currentExecutor = executor();
         do {
             ctx = ctx.next;
+        //寻找下一个能处理相应事件的
         } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_INBOUND));
         return ctx;
     }
@@ -931,6 +950,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         assert updated; // This should always be true as it MUST be called before setAddComplete() or setRemoved().
     }
 
+    // 处理器添加回调
     final void callHandlerAdded() throws Exception {
         // We must call setAddComplete before calling handlerAdded. Otherwise if the handlerAdded method generates
         // any pipeline events ctx.handler() will miss them because the state will not allow it.
@@ -943,6 +963,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         try {
             // Only call handlerRemoved(...) if we called handlerAdded(...) before.
             if (handlerState == ADD_COMPLETE) {
+                // 状态是已经添加完成的，调用删除时才会触发删除回调
                 handler().handlerRemoved(this);
             }
         } finally {

@@ -20,6 +20,8 @@ import io.netty.buffer.ByteBuf;
 /**
  * Combines {@link HttpMessage} and {@link LastHttpContent} into one
  * message. So it represent a <i>complete</i> http message.
+ * 请求和响应的通用HTTP信息接口
+ * 除了请求行的方法和URI和相应行的状态码之外的所有通用HTTP信息，也就是消息头，协议版本，消息体
  */
 public interface FullHttpMessage extends HttpMessage, LastHttpContent {
     @Override

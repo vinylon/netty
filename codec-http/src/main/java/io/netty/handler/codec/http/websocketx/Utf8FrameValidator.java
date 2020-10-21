@@ -23,7 +23,10 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.CorruptedFrameException;
 
 /**
- *
+ *这个是验证文本帧是否是UTF8编码的。
+ * 其实他就是检查是否是最后一帧，如果是文本帧的话就检测内容，不是UTF8的就抛异常。
+ * 如果是持续帧，只有第一帧是文本的才会开始检测，所以后续来的肯定是文本帧，
+ * 就不用判断是不是文本帧了，只要判断是不是在检测就好了。
  */
 public class Utf8FrameValidator extends ChannelInboundHandlerAdapter {
 
@@ -38,6 +41,7 @@ public class Utf8FrameValidator extends ChannelInboundHandlerAdapter {
             try {
                 // Processing for possible fragmented messages for text and binary
                 // frames
+                //是最后帧
                 if (((WebSocketFrame) msg).isFinalFragment()) {
                     // Final frame of the sequence. Apparently ping frames are
                     // allowed in the middle of a fragmented message
@@ -45,6 +49,7 @@ public class Utf8FrameValidator extends ChannelInboundHandlerAdapter {
                         fragmentedFramesCount = 0;
 
                         // Check text for UTF8 correctness
+                        //监测文本帧
                         if ((frame instanceof TextWebSocketFrame) ||
                                 (utf8Validator != null && utf8Validator.isChecking())) {
                             // Check UTF-8 correctness for this payload
@@ -52,18 +57,22 @@ public class Utf8FrameValidator extends ChannelInboundHandlerAdapter {
 
                             // This does a second check to make sure UTF-8
                             // correctness for entire text message
+                            //如果不是就报异常
                             utf8Validator.finish();
                         }
                     }
+                //不是最后帧
                 } else {
                     // Not final frame so we can expect more frames in the
                     // fragmented sequence
+                    //是第一帧，只检测文本
                     if (fragmentedFramesCount == 0) {
                         // First text or binary frame for a fragmented set
                         if (frame instanceof TextWebSocketFrame) {
+                            //检测内容
                             checkUTF8String(frame.content());
                         }
-                    } else {
+                    } else {//不是第一帧，继续检测，因为前面是文本的，所以持续帧也肯定是
                         // Subsequent frames - only check if init frame is text
                         if (utf8Validator != null && utf8Validator.isChecking()) {
                             checkUTF8String(frame.content());
@@ -71,6 +80,7 @@ public class Utf8FrameValidator extends ChannelInboundHandlerAdapter {
                     }
 
                     // Increment counter
+                    //帧数累加
                     fragmentedFramesCount++;
                 }
             } catch (CorruptedWebSocketFrameException e) {

@@ -51,6 +51,13 @@ import io.netty.handler.codec.TooLongFrameException;
  *     after this decoder in the {@link ChannelPipeline}.</td>
  * </tr>
  * </table>
+ * 请求解码器
+ * 首先会将请求行和请求头解析出来，
+ * 根据请求头中是否有Content-Length或者Transfer-Encoding: chunked属性来判断是否还需要进行解码，
+ * 如果需要，还持续进行解码，直到把消息体全部收完为止，
+ * 而且期间会解码一次传递一次消息，因此自定义的处理器会不断的收到消息，
+ * 第一次是消息行和消息头，后面就是消息体，直到收到最后一次消息体才会结束。
+ * 基本上是按这么解码的，每一块都会被向后传递
  */
 public class HttpRequestDecoder extends HttpObjectDecoder {
 
@@ -89,6 +96,8 @@ public class HttpRequestDecoder extends HttpObjectDecoder {
               initialBufferSize, allowDuplicateContentLengths);
     }
 
+    //根据请求行创建HttpMessage 版本，方法，URI
+    //创建一个DefaultHttpRequest，就是一个HttpRequest接口的默认实现，封装请求行和请求头信息
     @Override
     protected HttpMessage createMessage(String[] initialLine) throws Exception {
         return new DefaultHttpRequest(
@@ -96,11 +105,13 @@ public class HttpRequestDecoder extends HttpObjectDecoder {
                 HttpMethod.valueOf(initialLine[0]), initialLine[1], validateHeaders);
     }
 
+    //无效请求
     @Override
     protected HttpMessage createInvalidMessage() {
         return new DefaultFullHttpRequest(HttpVersion.HTTP_1_0, HttpMethod.GET, "/bad-request", validateHeaders);
     }
 
+    //是否是解码请求
     @Override
     protected boolean isDecodingRequest() {
         return true;

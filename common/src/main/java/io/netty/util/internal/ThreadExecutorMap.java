@@ -54,6 +54,8 @@ public final class ThreadExecutorMap {
         return new Executor() {
             @Override
             public void execute(final Runnable command) {
+                // apply，任务真正运行之前会设置setCurrentEventExecutor当前的eventExecutor也就是NioEventLoop，
+                // 里面用了ThreadLocal，当前线程独有的，任务运行完了就设置空了，具体里面还比较复杂，暂时不跟了，知道就好了
                 executor.execute(apply(command, eventExecutor));
             }
         };

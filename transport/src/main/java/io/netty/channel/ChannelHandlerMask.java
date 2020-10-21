@@ -89,11 +89,13 @@ final class ChannelHandlerMask {
      * Calculate the {@code executionMask}.
      */
     private static int mask0(Class<? extends ChannelHandler> handlerType) {
+        // 出站、入站 标记
         int mask = MASK_EXCEPTION_CAUGHT;
         try {
             if (ChannelInboundHandler.class.isAssignableFrom(handlerType)) {
                 mask |= MASK_ALL_INBOUND;
 
+                // isSkippable判断函数，是否要略过，根据反射出的方法和类的标注，声明了Skip标注，才会去除某个mask事件
                 if (isSkippable(handlerType, "channelRegistered", ChannelHandlerContext.class)) {
                     mask &= ~MASK_CHANNEL_REGISTERED;
                 }

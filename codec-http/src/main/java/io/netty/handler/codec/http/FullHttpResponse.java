@@ -20,6 +20,7 @@ import io.netty.buffer.ByteBuf;
 /**
  * Combination of a {@link HttpResponse} and {@link FullHttpMessage}.
  * So it represent a <i>complete</i> http response.
+ * 完整HTTP响应消息接口
  */
 public interface FullHttpResponse extends HttpResponse, FullHttpMessage {
     @Override

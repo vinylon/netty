@@ -233,6 +233,8 @@ final class PlatformDependent0 {
                             @Override
                             public Object run() {
                                 try {
+                                    // 这个构造方法是没有设置清除器的
+                                    // JDK的DirectByteBuffer，构造方法DirectByteBuffer(long addr, int cap)
                                     final Constructor<?> constructor =
                                             direct.getClass().getDeclaredConstructor(long.class, int.class);
                                     Throwable cause = ReflectionUtil.trySetAccessible(constructor, true);

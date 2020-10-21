@@ -34,6 +34,7 @@ package io.netty.handler.codec.http;
  * @see io.netty.handler.codec.http.cookie.ClientCookieDecoder
  * @see io.netty.handler.codec.http.cookie.ServerCookieEncoder
  * @see io.netty.handler.codec.http.cookie.ClientCookieEncoder
+ * 请求行相关独有接口，无消息体接口。
  */
 public interface HttpRequest extends HttpMessage {
 

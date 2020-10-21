@@ -345,8 +345,11 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
     @Override
     protected int doReadBytes(ByteBuf byteBuf) throws Exception {
+        //获取分配处理器
         final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+        //设置可写的字节
         allocHandle.attemptedBytesRead(byteBuf.writableBytes());
+        //读取通道的数据，写入字节缓冲区
         return byteBuf.writeBytes(javaChannel(), allocHandle.attemptedBytesRead());
     }
 
@@ -377,18 +380,24 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
     @Override
     protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+        //内部还是用NIO的操作的
         SocketChannel ch = javaChannel();
+        //写自旋的次数，默认是16次
         int writeSpinCount = config().getWriteSpinCount();
         do {
             if (in.isEmpty()) {
                 // All written so clear OP_WRITE
+                //全部写完后，进行写事件的清除
                 clearOpWrite();
                 // Directly return here so incompleteWrite(...) is not called.
+                //直接返回，不需要调用incompleteWrite
                 return;
             }
 
             // Ensure the pending writes are made of ByteBufs only.
+            //获取最大的待写字节数16384
             int maxBytesPerGatheringWrite = ((NioSocketChannelConfig) config).getMaxBytesPerGatheringWrite();
+            //获取ByteBuffer数组
             ByteBuffer[] nioBuffers = in.nioBuffers(1024, maxBytesPerGatheringWrite);
             int nioBufferCnt = in.nioBufferCount();
 
@@ -400,11 +409,13 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     writeSpinCount -= doWrite0(in);
                     break;
                 case 1: {
-                    // Only one ByteBuf so use non-gathering write
+                    // Only one ByteBuf so use non-gathering write 一个就不用gathering
                     // Zero length buffers are not added to nioBuffers by ChannelOutboundBuffer, so there is no need
                     // to check if the total size of all the buffers is non-zero.
-                    ByteBuffer buffer = nioBuffers[0];
+                    // 0字节的不会放进缓冲区里，不用检查
+                    ByteBuffer buffer = nioBuffers[0]; //只有一个
                     int attemptedBytes = buffer.remaining();
+                    //用NIO的SocketChannel写出去
                     final int localWrittenBytes = ch.write(buffer);
                     if (localWrittenBytes <= 0) {
                         incompleteWrite(true);
@@ -419,8 +430,11 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     // Zero length buffers are not added to nioBuffers by ChannelOutboundBuffer, so there is no need
                     // to check if the total size of all the buffers is non-zero.
                     // We limit the max amount to int above so cast is safe
+                    //获取发多少字节数据
                     long attemptedBytes = in.nioBufferSize();
+                    //一起写出去了
                     final long localWrittenBytes = ch.write(nioBuffers, 0, nioBufferCnt);
+                    //没完成
                     if (localWrittenBytes <= 0) {
                         incompleteWrite(true);
                         return;
@@ -429,6 +443,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     adjustMaxBytesPerGatheringWrite((int) attemptedBytes, (int) localWrittenBytes,
                             maxBytesPerGatheringWrite);
                     in.removeBytes(localWrittenBytes);
+                    // 递减
                     --writeSpinCount;
                     break;
                 }
@@ -443,6 +458,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         return new NioSocketChannelUnsafe();
     }
 
+    //这个是NioSocketChannel的unsafe。主要是prepareToClose方法的覆盖，取消注册事件，返回全局唯一的GlobalEventExecutor
     private final class NioSocketChannelUnsafe extends NioByteUnsafe {
         @Override
         protected Executor prepareToClose() {

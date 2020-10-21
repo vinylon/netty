@@ -104,34 +104,49 @@ final class PoolSubpage<T> implements PoolSubpageMetric {
     /**
      * @return {@code true} if this subpage is in use.
      *         {@code false} if this subpage is not used by its chunk and thus it's OK to be released.
+     * 释放位图中的索引位，可以给下一次申请的直接用，如果可用的数量是0，即已经是用完的子页的话，重新加入到head后。
+     * 返回true，说明不需要删除子页，又复用了。
+     * 如果可用数量不为0，释放后数量页等于最大数量，说明这个子页现在没有任何内存被分配出去了，那就等于这个子页没什么用了，
+     * 但是如果就只剩head了，那就不删除了，直接返回，删除的话后面申请的又的重新创建，浪费时间。
+     * 如果除了head还有其他子页，那就从双向循环列表中删除掉当前子页，
+     * 并设置需要销毁标志doNotDestroy=false，返回false，否则就返回true
      */
     boolean free(PoolSubpage<T> head, int bitmapIdx) {
         if (elemSize == 0) {
             return true;
         }
+        //获取位图在数组中的索引
         int q = bitmapIdx >>> 6;
+        //获取位图内部索引
         int r = bitmapIdx & 63;
         assert (bitmap[q] >>> r & 1) != 0;
+        //异或，设置为0
         bitmap[q] ^= 1L << r;
 
+        //将索引释放，下一个可以直接获取整个索引
         setNextAvail(bitmapIdx);
 
+        //如果已经使用完的子页，有空间了再加到head后
         if (numAvail ++ == 0) {
             addToPool(head);
             return true;
         }
 
+        //还有其他内存在使用
         if (numAvail != maxNumElems) {
-            return true;
+            return true;//还在使用，返回true
         } else {
+            //不使用了，所以能分配的就等于最大分配数
             // Subpage not in use (numAvail == maxNumElems)
+            //只有一个head了，那不能删除
             if (prev == next) {
                 // Do not remove if this subpage is the only one left in the pool.
                 return true;
             }
 
+            //如果有其他子页的话，删除当前子页
             // Remove this subpage from the pool if there are other subpages left in the pool.
-            doNotDestroy = false;
+            doNotDestroy = false;//设置要销毁
             removeFromPool();
             return false;
         }

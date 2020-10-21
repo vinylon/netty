@@ -58,26 +58,38 @@ class WebSocketServerProtocolHandshakeHandler extends ChannelInboundHandlerAdapt
         handshakePromise = ctx.newPromise();
     }
 
+    /**
+     * 验证协议url。
+     * 验证GET的请求升级。
+     * 移除当前处理器
+     * 创建握手WebSocketServerHandshaker 对象，进行握手。
+     * 启动一个定义任务进行超时回调
+     */
     @Override
     public void channelRead(final ChannelHandlerContext ctx, Object msg) throws Exception {
         final FullHttpRequest req = (FullHttpRequest) msg;
+        //不是websocket路径就不管
         if (!isWebSocketPath(req)) {
             ctx.fireChannelRead(msg);
             return;
         }
 
         try {
+            //只有GET支持的升级的
             if (!GET.equals(req.method())) {
                 sendHttpResponse(ctx, req, new DefaultFullHttpResponse(HTTP_1_1, FORBIDDEN, ctx.alloc().buffer(0)));
                 return;
             }
 
+            //创建握手工厂
             final WebSocketServerHandshakerFactory wsFactory = new WebSocketServerHandshakerFactory(
                     getWebSocketLocation(ctx.pipeline(), req, serverConfig.websocketPath()),
                     serverConfig.subprotocols(), serverConfig.decoderConfig());
+            //创建一个握手处理器
             final WebSocketServerHandshaker handshaker = wsFactory.newHandshaker(req);
+            //握手回调
             final ChannelPromise localHandshakePromise = handshakePromise;
-            if (handshaker == null) {
+            if (handshaker == null) {//不支持的版本
                 WebSocketServerHandshakerFactory.sendUnsupportedVersionResponse(ctx.channel());
             } else {
                 // Ensure we set the handshaker and replace this handler before we
@@ -85,27 +97,34 @@ class WebSocketServerProtocolHandshakeHandler extends ChannelInboundHandlerAdapt
                 // before we had a chance to replace it.
                 //
                 // See https://github.com/netty/netty/issues/9471.
+                //设置处理器
                 WebSocketServerProtocolHandler.setHandshaker(ctx.channel(), handshaker);
+                // 移除当前处理器
                 ctx.pipeline().remove(this);
 
                 final ChannelFuture handshakeFuture = handshaker.handshake(ctx.channel(), req);
+                // 添加握手监听
                 handshakeFuture.addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) {
-                        if (!future.isSuccess()) {
+                        if (!future.isSuccess()) {//发送不成功
                             localHandshakePromise.tryFailure(future.cause());
                             ctx.fireExceptionCaught(future.cause());
-                        } else {
+                        } else {//发送成功
                             localHandshakePromise.trySuccess();
                             // Kept for compatibility
+                            //  保持兼容性 触发事件
                             ctx.fireUserEventTriggered(
                                     WebSocketServerProtocolHandler.ServerHandshakeStateEvent.HANDSHAKE_COMPLETE);
+                            //这个是新的 上面的过时了
                             ctx.fireUserEventTriggered(
                                     new WebSocketServerProtocolHandler.HandshakeComplete(
                                             req.uri(), req.headers(), handshaker.selectedSubprotocol()));
                         }
                     }
                 });
+                //发送可能会等好久，所以就给了个超时的定时任务，
+                // 默认设置是10秒，超时了就触发超时事件，然后关闭通道，如果发送回调了，就把定时任务取消
                 applyHandshakeTimeout();
             }
         } finally {
@@ -118,6 +137,9 @@ class WebSocketServerProtocolHandshakeHandler extends ChannelInboundHandlerAdapt
         String uri = req.uri();
         boolean checkStartUri = uri.startsWith(websocketPath);
         boolean checkNextUri = checkNextUri(uri, websocketPath);
+        // 看一下是比较整个字符串还是比较开头。 默认是比较整个字符串
+        // 这个path在初始化WebSocketServerProtocolHandler处理器时指定，如下：
+        // pipeline.addLast(new WebSocketServerProtocolHandler("/wc"))
         return serverConfig.checkStartsWith() ? (checkStartUri && checkNextUri) : uri.equals(websocketPath);
     }
 
@@ -130,8 +152,10 @@ class WebSocketServerProtocolHandshakeHandler extends ChannelInboundHandlerAdapt
         return true;
     }
 
+    //如果响应的状态码不是200或者请求不是设置长连接，就关闭通道了
     private static void sendHttpResponse(ChannelHandlerContext ctx, HttpRequest req, HttpResponse res) {
         ChannelFuture f = ctx.channel().writeAndFlush(res);
+        //req不支持KeepAlive，或者res状态码不是200就等写完成了关闭通道
         if (!isKeepAlive(req) || res.status().code() != 200) {
             f.addListener(ChannelFutureListener.CLOSE);
         }
@@ -151,6 +175,7 @@ class WebSocketServerProtocolHandshakeHandler extends ChannelInboundHandlerAdapt
         final ChannelPromise localHandshakePromise = handshakePromise;
         final long handshakeTimeoutMillis = serverConfig.handshakeTimeoutMillis();
         if (handshakeTimeoutMillis <= 0 || localHandshakePromise.isDone()) {
+            //完成了就不管了
             return;
         }
 
@@ -159,6 +184,7 @@ class WebSocketServerProtocolHandshakeHandler extends ChannelInboundHandlerAdapt
             public void run() {
                 if (!localHandshakePromise.isDone() &&
                         localHandshakePromise.tryFailure(new WebSocketHandshakeException("handshake timed out"))) {
+                    //没完成就刷出去，触发超时事件，然后关闭
                     ctx.flush()
                        .fireUserEventTriggered(ServerHandshakeStateEvent.HANDSHAKE_TIMEOUT)
                        .close();
@@ -166,6 +192,7 @@ class WebSocketServerProtocolHandshakeHandler extends ChannelInboundHandlerAdapt
             }
         }, handshakeTimeoutMillis, TimeUnit.MILLISECONDS);
 
+        //如果成功了，就把超时任务取消
         // Cancel the handshake timeout when handshake is finished.
         localHandshakePromise.addListener(new FutureListener<Void>() {
             @Override

@@ -216,9 +216,13 @@ public class WebSocketServerProtocolHandler extends WebSocketProtocolHandler {
             .build());
     }
 
+    //初始化添加的时候，会调用handlerAdded进行处理器的添加，
+    // 分别添加握手处理器WebSocketServerProtocolHandshakeHandler，
+    // UTF8文本帧验证器Utf8FrameValidator，
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) {
         ChannelPipeline cp = ctx.pipeline();
+        //在前面添加一个握手处理器
         if (cp.get(WebSocketServerProtocolHandshakeHandler.class) == null) {
             // Add the WebSocketHandshakeHandler before this one.
             cp.addBefore(ctx.name(), WebSocketServerProtocolHandshakeHandler.class.getName(),
@@ -231,14 +235,20 @@ public class WebSocketServerProtocolHandler extends WebSocketProtocolHandler {
         }
     }
 
+    //主要是判断是不是关闭帧，
+    // 是的话就拿出开始创建的握手对象，然后实现关闭，其实就是发送关闭帧。
+    // 否则的话就让父类WebSocketProtocolHandler处理
     @Override
     protected void decode(ChannelHandlerContext ctx, WebSocketFrame frame, List<Object> out) throws Exception {
+        //如果要处理关闭帧
         if (serverConfig.handleCloseFrames() && frame instanceof CloseWebSocketFrame) {
             WebSocketServerHandshaker handshaker = getHandshaker(ctx.channel());
             if (handshaker != null) {
                 frame.retain();
+                //握手处理器来处理关闭
                 handshaker.close(ctx.channel(), (CloseWebSocketFrame) frame);
             } else {
+                //直接处理
                 ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
             return;

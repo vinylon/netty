@@ -37,9 +37,11 @@ import java.util.List;
  * | ABC | DEF | GHI |
  * +-----+-----+-----+
  * </pre>
+ * 固定长度解码，只要到了这个长度，就切片这个长度的缓冲区当做一个消息
  */
 public class FixedLengthFrameDecoder extends ByteToMessageDecoder {
 
+    //固定一帧的长度
     private final int frameLength;
 
     /**
@@ -52,6 +54,13 @@ public class FixedLengthFrameDecoder extends ByteToMessageDecoder {
         this.frameLength = frameLength;
     }
 
+    /**
+     * 调用自定义的解码方法decode，然后把结果放进消息队列out中。
+     * 具体的解码就是看可读数据是否大于等于固定长，如果是，就进行缓冲区的保留切片，切出固定长的缓冲区，
+     * 这里为什么要保留切片呢，因为切片是共享原缓冲区的数据的，如果源缓冲区用完了可能被释放，所以需要保留一下，
+     * 增加引用计数，当然在切片释放的时候，也会释放源缓冲区的。
+     * 注意如果没达到解码器要求的，可能不会去读取缓冲区数据。
+     */
     @Override
     protected final void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
         Object decoded = decode(ctx, in);
@@ -70,9 +79,10 @@ public class FixedLengthFrameDecoder extends ByteToMessageDecoder {
      */
     protected Object decode(
             @SuppressWarnings("UnusedParameters") ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-        if (in.readableBytes() < frameLength) {
+        if (in.readableBytes() < frameLength) {//如果可读字节的小于固定长度，什么都不做
             return null;
         } else {
+            //返回的是切片,会增加in引用计数，防止被回收了
             return in.readRetainedSlice(frameLength);
         }
     }

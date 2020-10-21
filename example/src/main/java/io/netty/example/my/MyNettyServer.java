@@ -24,19 +24,23 @@ public class MyNettyServer {
             bootstrap.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
+                        // 通道的初始化
                         @Override
                         protected void initChannel(SocketChannel ch) throws Exception {
                             ch.pipeline().addLast(new MyNettyServerHandler());
                         }
                     });
+            // sync()阻塞
             ChannelFuture cf = bootstrap.bind(8888).sync();
-            cf.addListener((ChannelFutureListener) future -> {
+            // 注册一个监听绑定完成事件的回调
+            cf.addListener(future -> {
                 if (cf.isSuccess()) {
                     System.out.println("监听端口 8888 成功");
                 } else {
                     System.out.println("监听端口 8888 失败");
                 }
             });
+            // 阻塞关闭事件
             cf.channel().closeFuture().sync();
         } finally {
             bossGroup.shutdownGracefully();

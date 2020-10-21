@@ -32,24 +32,34 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 class UnpaddedInternalThreadLocalMap {
 
+    //从ThreadLocal中获取InternalThreadLocalMap
     static final ThreadLocal<InternalThreadLocalMap> slowThreadLocalMap = new ThreadLocal<InternalThreadLocalMap>();
+    //索引
     static final AtomicInteger nextIndex = new AtomicInteger();
 
     /** Used by {@link FastThreadLocal} */
+    //放对象的数组
     Object[] indexedVariables;
 
     // Core thread-locals
+    //未来监听器栈的深度
     int futureListenerStackDepth;
+    //本地通道读的栈深度
     int localChannelReaderStackDepth;
+    //处理器共享缓存
     Map<Class<?>, Boolean> handlerSharableCache;
     IntegerHolder counterHashCode;
     ThreadLocalRandom random;
+    //参数类型匹配缓存
     Map<Class<?>, TypeParameterMatcher> typeParameterMatcherGetCache;
+    //参数类型匹配寻找缓存
     Map<Class<?>, Map<String, TypeParameterMatcher>> typeParameterMatcherFindCache;
 
     // String-related thread-locals
     StringBuilder stringBuilder;
+    //编码器缓存
     Map<Charset, CharsetEncoder> charsetEncoderCache;
+    //解码器缓存
     Map<Charset, CharsetDecoder> charsetDecoderCache;
 
     // ArrayList-related thread-locals

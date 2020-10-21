@@ -31,7 +31,7 @@ final class PooledUnsafeHeapByteBuf extends PooledHeapByteBuf {
     });
 
     static PooledUnsafeHeapByteBuf newUnsafeInstance(int maxCapacity) {
-        PooledUnsafeHeapByteBuf buf = RECYCLER.get();
+        PooledUnsafeHeapByteBuf buf = RECYCLER.get();//池里获取
         buf.reuse(maxCapacity);
         return buf;
     }

@@ -104,10 +104,14 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
             return false;
         }
 
+        //遍历里面的块，块存在就尝试分配，块用满了就往下一个放
         for (PoolChunk<T> cur = head; cur != null; cur = cur.next) {
             if (cur.allocate(buf, reqCapacity, sizeIdx, threadCache)) {
+                //使用率已经大于等于最大的了
                 if (cur.freeBytes <= freeMinThreshold) {
+                    //从当前块列表移除
                     remove(cur);
+                    //放到下一个块列表里
                     nextList.add(cur);
                 }
                 return true;
@@ -116,11 +120,17 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
         return false;
     }
 
+    // 最终还是要到chunk中释放。释放完之后看使用率进行移动并从块列表中删除，
+    // 如果移动到q000不能往前移了，就说明块没利用率，没说没任何使用，得释放了，返回false。否则返回true
     boolean free(PoolChunk<T> chunk, long handle, int normCapacity, ByteBuffer nioBuffer) {
+        //块释放内存
         chunk.free(handle, normCapacity, nioBuffer);
+        //小于最小使用率的
         if (chunk.freeBytes > freeMaxThreshold) {
+            //从当前快列表中删除
             remove(chunk);
             // Move the PoolChunk down the PoolChunkList linked-list.
+            //给上一个快列表
             return move0(chunk);
         }
         return true;
@@ -142,14 +152,17 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
     /**
      * Moves the {@link PoolChunk} down the {@link PoolChunkList} linked-list so it will end up in the right
      * {@link PoolChunkList} that has the correct minUsage / maxUsage in respect to {@link PoolChunk#usage()}.
+     * 往以一个块列表移，如果发现符合条件就加入块列表，否则就继续往前移，直到移到q000块列表位为止，返回false，表示要销毁这个块。
      */
     private boolean move0(PoolChunk<T> chunk) {
+        //当前块列表没有前一个块列表了，也就是Q0，可以直接删除块释放内存
         if (prevList == null) {
             // There is no previous PoolChunkList so return false which result in having the PoolChunk destroyed and
             // all memory associated with the PoolChunk will be released.
             assert chunk.usage() == 0;
             return false;
         }
+        //移动到前一个快列表中
         return prevList.move(chunk);
     }
 
@@ -178,13 +191,14 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
         }
     }
 
+    // 发现chunk块列表的使用率小的话，就从块列表中删除，并准备往前移
     private void remove(PoolChunk<T> cur) {
-        if (cur == head) {
+        if (cur == head) {//是头结点处理
             head = cur.next;
             if (head != null) {
                 head.prev = null;
             }
-        } else {
+        } else {//非头结点处理
             PoolChunk<T> next = cur.next;
             cur.prev.next = next;
             if (next != null) {

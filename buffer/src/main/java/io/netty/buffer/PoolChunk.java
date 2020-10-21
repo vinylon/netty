@@ -145,9 +145,14 @@ final class PoolChunk<T> implements PoolChunkMetric {
     static final int SIZE_SHIFT = INUSED_BIT_LENGTH + IS_USED_SHIFT;
     static final int RUN_OFFSET_SHIFT = SIZE_BIT_LENGTH + SIZE_SHIFT;
 
+    //所在的arena区域
     final PoolArena<T> arena;
+    //真正分配的内存，如果是堆内的话就是字节数组，否则就是直接缓冲区DirectByteBuffer，
+    // 这个是真正操作分配的内存，其他的一些都是逻辑上分配内存
     final T memory;
+    //是否要进行池化
     final boolean unpooled;
+    //缓存行偏移，默认0
     final int offset;
 
     /**
@@ -162,11 +167,15 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
     /**
      * manage all subpages in this chunk
+     * //子页数组，也是满二叉树的叶子节点数组
      */
     private final PoolSubpage<T>[] subpages;
 
+    //页大小 8k
     private final int pageSize;
+    //页位移，也就是pageSize=1<<<pageShifts,8k就是13，即2的13次方是8k
     private final int pageShifts;
+    //块大小，默认16m
     private final int chunkSize;
 
     // Use as cache for ByteBuffer created from the memory. These are just duplicates and so are only a container
@@ -174,12 +183,17 @@ final class PoolChunk<T> implements PoolChunkMetric {
     // may produce extra GC, which can be greatly reduced by caching the duplicates.
     //
     // This may be null if the PoolChunk is unpooled as pooling the ByteBuffer instances does not make any sense here.
+    //池化用
     private final Deque<ByteBuffer> cachedNioBuffers;
 
+    //可分配的字节数，默认是16m
     int freeBytes;
 
+    //所在的块列表
     PoolChunkList<T> parent;
+    //前驱
     PoolChunk<T> prev;
+    //后继
     PoolChunk<T> next;
 
     // TODO: Test if adding padding helps under contention
@@ -187,7 +201,7 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
     @SuppressWarnings("unchecked")
     PoolChunk(PoolArena<T> arena, T memory, int pageSize, int pageShifts, int chunkSize, int maxPageIdx, int offset) {
-        unpooled = false;
+        unpooled = false;//池化
         this.arena = arena;
         this.memory = memory;
         this.pageSize = pageSize;

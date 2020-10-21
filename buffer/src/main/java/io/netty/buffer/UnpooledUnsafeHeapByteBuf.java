@@ -34,6 +34,7 @@ public class UnpooledUnsafeHeapByteBuf extends UnpooledHeapByteBuf {
         super(alloc, initialCapacity, maxCapacity);
     }
 
+    //用到了PlatformDependent平台相关的类，最后是用反射做的，因为unsafe只能java内部自己用，外面要用可以用反射
     @Override
     protected byte[] allocateArray(int initialCapacity) {
         return PlatformDependent.allocateUninitializedArray(initialCapacity);

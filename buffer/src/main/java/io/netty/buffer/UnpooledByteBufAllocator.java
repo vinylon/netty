@@ -134,6 +134,7 @@ public final class UnpooledByteBufAllocator extends AbstractByteBufAllocator imp
         metric.heapCounter.add(-amount);
     }
 
+    //仪表化的无池化的堆缓冲区
     private static final class InstrumentedUnpooledUnsafeHeapByteBuf extends UnpooledUnsafeHeapByteBuf {
         InstrumentedUnpooledUnsafeHeapByteBuf(UnpooledByteBufAllocator alloc, int initialCapacity, int maxCapacity) {
             super(alloc, initialCapacity, maxCapacity);
@@ -141,11 +142,12 @@ public final class UnpooledByteBufAllocator extends AbstractByteBufAllocator imp
 
         @Override
         protected byte[] allocateArray(int initialCapacity) {
-            byte[] bytes = super.allocateArray(initialCapacity);
-            ((UnpooledByteBufAllocator) alloc()).incrementHeap(bytes.length);
+            byte[] bytes = super.allocateArray(initialCapacity); //申请了字节数组
+            ((UnpooledByteBufAllocator) alloc()).incrementHeap(bytes.length); //增加堆字节
             return bytes;
         }
 
+        //实现了释放内部字节数组
         @Override
         protected void freeArray(byte[] array) {
             int length = array.length;

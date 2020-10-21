@@ -48,8 +48,11 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
 
     // The order in which child ChannelOptions are applied is important they may depend on each other for validation
     // purposes.
+    // 选项
     private final Map<ChannelOption<?>, Object> childOptions = new LinkedHashMap<ChannelOption<?>, Object>();
+    // 属性
     private final Map<AttributeKey<?>, Object> childAttrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
+    // 配置
     private final ServerBootstrapConfig config = new ServerBootstrapConfig(this);
     private volatile EventLoopGroup childGroup;
     private volatile ChannelHandler childHandler;
@@ -142,15 +145,18 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         }
         final Entry<AttributeKey<?>, Object>[] currentChildAttrs = childAttrs.entrySet().toArray(EMPTY_ATTRIBUTE_ARRAY);
 
+        // addLast 实际上是把新的context放到tail的前面，也就是双向链表中倒数第二个位置
         p.addLast(new ChannelInitializer<Channel>() {
             @Override
             public void initChannel(final Channel ch) {
                 final ChannelPipeline pipeline = ch.pipeline();
                 ChannelHandler handler = config.handler();
+                //如果有设置handler ，把handler 也加上
                 if (handler != null) {
                     pipeline.addLast(handler);
                 }
 
+                // 开启一个循环把连接接收器ServerBootstrapAcceptor加入通道
                 ch.eventLoop().execute(new Runnable() {
                     @Override
                     public void run() {
@@ -207,14 +213,19 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         @Override
         @SuppressWarnings("unchecked")
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            //得到NioSocketChannel
             final Channel child = (Channel) msg;
 
+            //在得到NioSocketChannel的管道中添加我们自定义的初始化处理器
             child.pipeline().addLast(childHandler);
 
+            //设置选项
             setChannelOptions(child, childOptions, logger);
+            //设置属性
             setAttributes(child, childAttrs);
 
             try {
+                //向workerGroupt注册NioSocketChannel并添加完成监听
                 childGroup.register(child).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {

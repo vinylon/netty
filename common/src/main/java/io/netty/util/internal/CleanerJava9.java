@@ -36,6 +36,7 @@ final class CleanerJava9 implements Cleaner {
         final Method method;
         final Throwable error;
         if (PlatformDependent0.hasUnsafe()) {
+            //直接是用反射取出unsafe的方法invokeCleaner，顺便调用一次，把申请的内存先释放了
             final ByteBuffer buffer = ByteBuffer.allocateDirect(1);
             Object maybeInvokeMethod = AccessController.doPrivileged(new PrivilegedAction<Object>() {
                 @Override
@@ -72,6 +73,7 @@ final class CleanerJava9 implements Cleaner {
         } else {
             logger.debug("java.nio.ByteBuffer.cleaner(): unavailable", error);
         }
+        // 指定invokeCleaner
         INVOKE_CLEANER = method;
     }
 
@@ -85,6 +87,7 @@ final class CleanerJava9 implements Cleaner {
         // See https://bugs.openjdk.java.net/browse/JDK-8191053.
         if (System.getSecurityManager() == null) {
             try {
+                //反射调用
                 INVOKE_CLEANER.invoke(PlatformDependent0.UNSAFE, buffer);
             } catch (Throwable cause) {
                 PlatformDependent0.throwException(cause);

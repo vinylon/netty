@@ -83,27 +83,43 @@ import static io.netty.handler.codec.http.HttpUtil.getContentLength;
  * @see FullHttpResponse
  * @see HttpResponseDecoder
  * @see HttpServerCodec
+ * 消息聚合器
+ * 可以把消息聚合成一个复合缓冲区，一起给后面的处理器，直接封装成AggregatedFullHttpRequest类型传递下去。
+ * 这样就不需要在处理器中判断是否接受到一半的逻辑了。但是这个有一个指定接受的长度限制，超过长度了直接就丢弃不处理了。
+ * 主要可以用于接收一些相对较小的消息，不用后面处理器再去判断是否是个完整的包，但是如果包很大可能占用很大内存
  */
 public class HttpObjectAggregator
+    //有4个泛型，分别对应是聚合HTTP类型的，HTTP通用消息请求行和请求头的，HTTP消息体，HTTP完整通用消息，包括消息体
         extends MessageAggregator<HttpObject, HttpMessage, HttpContent, FullHttpMessage> {
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(HttpObjectAggregator.class);
+
+    //接受100-continue，响应状态码100
+    //Except:100-continue的响应
     private static final FullHttpResponse CONTINUE =
             new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE, Unpooled.EMPTY_BUFFER);
+    //不接受，响应状态码417 不支持
     private static final FullHttpResponse EXPECTATION_FAILED = new DefaultFullHttpResponse(
             HttpVersion.HTTP_1_1, HttpResponseStatus.EXPECTATION_FAILED, Unpooled.EMPTY_BUFFER);
+
+    //不接受，响应状态码413 消息体太大而关闭连接
     private static final FullHttpResponse TOO_LARGE_CLOSE = new DefaultFullHttpResponse(
             HttpVersion.HTTP_1_1, HttpResponseStatus.REQUEST_ENTITY_TOO_LARGE, Unpooled.EMPTY_BUFFER);
+
+    //不接受，响应状态码413 消息体太大，没关闭连接
     private static final FullHttpResponse TOO_LARGE = new DefaultFullHttpResponse(
         HttpVersion.HTTP_1_1, HttpResponseStatus.REQUEST_ENTITY_TOO_LARGE, Unpooled.EMPTY_BUFFER);
 
     static {
+        //设定头消息
         EXPECTATION_FAILED.headers().set(CONTENT_LENGTH, 0);
         TOO_LARGE.headers().set(CONTENT_LENGTH, 0);
 
         TOO_LARGE_CLOSE.headers().set(CONTENT_LENGTH, 0);
+        //关闭头信息
         TOO_LARGE_CLOSE.headers().set(CONNECTION, HttpHeaderValues.CLOSE);
     }
 
+    //如果消息过大是否关闭连接，报异常
     private final boolean closeOnExpectationFailed;
 
     /**
@@ -130,6 +146,7 @@ public class HttpObjectAggregator
         this.closeOnExpectationFailed = closeOnExpectationFailed;
     }
 
+    //对HTTP来说其实就是判断是否是通用的消息行和消息头信息
     @Override
     protected boolean isStartMessage(HttpObject msg) throws Exception {
         return msg instanceof HttpMessage;
@@ -140,11 +157,13 @@ public class HttpObjectAggregator
         return msg instanceof HttpContent;
     }
 
+    //是否是最后的内容。
     @Override
     protected boolean isLastContentMessage(HttpContent msg) throws Exception {
         return msg instanceof LastHttpContent;
     }
 
+    //是否聚合好了。
     @Override
     protected boolean isAggregated(HttpObject msg) throws Exception {
         return msg instanceof FullHttpMessage;
@@ -159,30 +178,34 @@ public class HttpObjectAggregator
         }
     }
 
+    //根据是否支持100-continue，是否长度超过限制等进行响应
     private static Object continueResponse(HttpMessage start, int maxContentLength, ChannelPipeline pipeline) {
+        //不支持Expect头
         if (HttpUtil.isUnsupportedExpectation(start)) {
             // if the request contains an unsupported expectation, we return 417
             pipeline.fireUserEventTriggered(HttpExpectationFailedEvent.INSTANCE);
             return EXPECTATION_FAILED.retainedDuplicate();
+        //支持100-continue请求
         } else if (HttpUtil.is100ContinueExpected(start)) {
             // if the request contains 100-continue but the content-length is too large, we return 413
             if (getContentLength(start, -1L) <= maxContentLength) {
-                return CONTINUE.retainedDuplicate();
+                return CONTINUE.retainedDuplicate();//继续
             }
             pipeline.fireUserEventTriggered(HttpExpectationFailedEvent.INSTANCE);
-            return TOO_LARGE.retainedDuplicate();
+            return TOO_LARGE.retainedDuplicate();//消息体太大
         }
 
         return null;
     }
 
+    //如果需要100-continue响应的话，要把100-continue头设置去掉，不往后传播了
     @Override
     protected Object newContinueResponse(HttpMessage start, int maxContentLength, ChannelPipeline pipeline) {
         Object response = continueResponse(start, maxContentLength, pipeline);
         // we're going to respond based on the request expectation so there's no
         // need to propagate the expectation further.
         if (response != null) {
-            start.headers().remove(EXPECT);
+            start.headers().remove(EXPECT);//如果有100-continue响应，就不用再传播下去了
         }
         return response;
     }
@@ -201,6 +224,7 @@ public class HttpObjectAggregator
         return false;
     }
 
+    //创建一个聚合的类，根据不同情况创建请求还是响应的完整类型
     @Override
     protected FullHttpMessage beginAggregation(HttpMessage start, ByteBuf content) throws Exception {
         assert !(start instanceof FullHttpMessage);
@@ -209,17 +233,19 @@ public class HttpObjectAggregator
 
         AggregatedFullHttpMessage ret;
         if (start instanceof HttpRequest) {
-            ret = new AggregatedFullHttpRequest((HttpRequest) start, content, null);
+            ret = new AggregatedFullHttpRequest((HttpRequest) start, content, null);//聚合请求
         } else if (start instanceof HttpResponse) {
-            ret = new AggregatedFullHttpResponse((HttpResponse) start, content, null);
+            ret = new AggregatedFullHttpResponse((HttpResponse) start, content, null);//聚合响应
         } else {
             throw new Error();
         }
         return ret;
     }
 
+    //整合尾部的头信息，因为chunk协议可能会有尾部头信息的
     @Override
     protected void aggregate(FullHttpMessage aggregated, HttpContent content) throws Exception {
+        //如果是最后的尾部内容就整合尾部头信息
         if (content instanceof LastHttpContent) {
             // Merge trailing headers into the message.
             ((AggregatedFullHttpMessage) aggregated).setTrailingHeaders(((LastHttpContent) content).trailingHeaders());
@@ -234,6 +260,7 @@ public class HttpObjectAggregator
         // transmitted if a GET would have been used.
         //
         // See rfc2616 14.13 Content-Length
+        //没设置Content-Length头的话要设置
         if (!HttpUtil.isContentLengthSet(aggregated)) {
             aggregated.headers().set(
                     CONTENT_LENGTH,

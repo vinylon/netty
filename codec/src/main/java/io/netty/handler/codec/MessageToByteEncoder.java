@@ -45,6 +45,7 @@ import io.netty.util.internal.TypeParameterMatcher;
  */
 public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdapter {
 
+    //类型参数匹配器 只有匹配到相应的泛型，才会进行解码，否则就往前传递
     private final TypeParameterMatcher matcher;
     private final boolean preferDirect;
 
@@ -70,6 +71,11 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
      *                              {@link ByteBuf}, which is backed by an byte array.
      */
     protected MessageToByteEncoder(boolean preferDirect) {
+        // 字符串I，也就是底层会通过反射出泛型的具体类型，然后获得匹配器
+        //这里是通过当前对象的Class对象比如Class1，对应找到HashMap<String, TypeParameterMatcher>()，
+        // 通过字符串I再找到TypeParameterMatcher。
+        // 在这个过程中，会将I对应的具体类型parameterType和TypeParameterMatcher也放入UnpaddedInternalThreadLocalMap的
+        // typeParameterMatcherGetCache缓存中
         matcher = TypeParameterMatcher.find(this, MessageToByteEncoder.class, "I");
         this.preferDirect = preferDirect;
     }
@@ -82,6 +88,8 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
      *                              the encoded messages. If {@code false} is used it will allocate a heap
      *                              {@link ByteBuf}, which is backed by an byte array.
      */
+    //传了要匹配的类型，直接去获取匹配器即可。
+    // 这里就是直接parameterType和TypeParameterMatcher对应起来了
     protected MessageToByteEncoder(Class<? extends I> outboundMessageType, boolean preferDirect) {
         matcher = TypeParameterMatcher.get(outboundMessageType);
         this.preferDirect = preferDirect;
@@ -99,13 +107,19 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         ByteBuf buf = null;
         try {
+            // 判断消息是否是类型匹配的
             if (acceptOutboundMessage(msg)) {
                 @SuppressWarnings("unchecked")
+                // 强转消息
                 I cast = (I) msg;
+
+                // 申请缓冲区
                 buf = allocateBuffer(ctx, cast, preferDirect);
                 try {
+                    // 编码
                     encode(ctx, cast, buf);
                 } finally {
+                    // 释放引用计数
                     ReferenceCountUtil.release(cast);
                 }
 
@@ -136,6 +150,7 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
      */
     protected ByteBuf allocateBuffer(ChannelHandlerContext ctx, @SuppressWarnings("unused") I msg,
                                boolean preferDirect) throws Exception {
+        //如果优先是直接缓冲区，就会申请直接缓冲区，否则就是堆内缓冲区
         if (preferDirect) {
             return ctx.alloc().ioBuffer();
         } else {

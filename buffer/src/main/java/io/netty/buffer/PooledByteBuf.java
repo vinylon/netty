@@ -28,14 +28,22 @@ import java.nio.channels.ScatteringByteChannel;
 
 abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
+    //用于对象池的回收
     private final Handle<PooledByteBuf<T>> recyclerHandle;
 
+    //表示分配在哪个块上
     protected PoolChunk<T> chunk;
+    //表示在块上分配的偏移地址
     protected long handle;
+    //具体内存形式，堆内就是字节数组，对外就是DirectByteBuffer
     protected T memory;
+    //避免缓存行出现假共享
     protected int offset;
+    //请求的内存大小
     protected int length;
+    //规范后的内存大小，最大能用的空间
     int maxLength;
+    //线程本地缓存，优先从缓存获取可用的块和句柄信息
     PoolThreadCache cache;
     ByteBuffer tmpNioBuf;
     private ByteBufAllocator allocator;
@@ -162,6 +170,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
     protected abstract ByteBuffer newInternalNioBuffer(T memory);
 
+    //就是释放内存资源，属性重新设置回默认，自己也回收到对象池里
     @Override
     protected final void deallocate() {
         if (handle >= 0) {
@@ -171,7 +180,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
             chunk.arena.free(chunk, tmpNioBuf, handle, maxLength, cache);
             tmpNioBuf = null;
             chunk = null;
-            recycle();
+            recycle();//放进池里面
         }
     }
 

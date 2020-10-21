@@ -52,16 +52,24 @@ import static io.netty.util.internal.ObjectUtil.checkPositiveOrZero;
 public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends ByteBufHolder>
         extends MessageToMessageDecoder<I> {
 
+    //最大复合缓冲区组件个数
     private static final int DEFAULT_MAX_COMPOSITEBUFFER_COMPONENTS = 1024;
 
+    //最大消息长度
     private final int maxContentLength;
+    //当前消息
     private O currentMessage;
+    //是否处理过大消息
     private boolean handlingOversizedMessage;
 
+    //累加组件的最大个数
     private int maxCumulationBufferComponents = DEFAULT_MAX_COMPOSITEBUFFER_COMPONENTS;
+    //处理器上下文
     private ChannelHandlerContext ctx;
+    // 100-continue响应监听器
     private ChannelFutureListener continueResponseWriteListener;
 
+    //是否正在聚合
     private boolean aggregating;
 
     /**
@@ -87,9 +95,13 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
         checkPositiveOrZero(maxContentLength, "maxContentLength");
     }
 
+    //判断类型
+    //判断是否是泛型I类型，也就是我们HttpObjectAggregator泛型中的HttpObject类型，是才会处理，否则就不处理。
+    // 然后会判断是否聚合好了，如果没开始聚合就进行聚合，如果还在聚合就继续
     @Override
     public boolean acceptInboundMessage(Object msg) throws Exception {
         // No need to match last and full types because they are subset of first and middle types.
+        //是否是泛型I类型，比如HttpObject类型
         if (!super.acceptInboundMessage(msg)) {
             return false;
         }
@@ -97,16 +109,18 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
         @SuppressWarnings("unchecked")
         I in = (I) msg;
 
+        //是否聚合好了
         if (isAggregated(in)) {
             return false;
         }
 
         // NOTE: It's tempting to make this check only if aggregating is false. There are however
         // side conditions in decode(...) in respect to large messages.
+        //是否是开始聚合
         if (isStartMessage(in)) {
-            aggregating = true;
+            aggregating = true;//开始聚合
             return true;
-        } else if (aggregating && isContentMessage(in)) {
+        } else if (aggregating && isContentMessage(in)) {//正在内容聚合
             return true;
         }
 
@@ -204,12 +218,23 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
         return ctx;
     }
 
+    // 聚合操作
+    //如果是开始消息，也就不是请求体，那就开始判断是否有Except:100-continue头信息，
+    // 有的话根据长度和是否支持来判断是否要返回响应。
+    // 之后判断如果前面解码失败，就直接整合消息体返回，
+    // 否则就创建复合缓冲区，如果是消息体的话就添加进去，然后封装成一个完整的消息类型。
+    //
+    //如果是消息体了，就加入到复合缓冲区里，
+    // 然后判断是否是最后一个消息体，是的话就进行最后的整合，其实就是设置Content-Length头信息。
     @Override
     protected void decode(final ChannelHandlerContext ctx, I msg, List<Object> out) throws Exception {
         assert aggregating;
 
+        //是否是开始消息
         if (isStartMessage(msg)) {
+            //没处理超大信息
             handlingOversizedMessage = false;
+            //上次的消息没释放
             if (currentMessage != null) {
                 currentMessage.release();
                 currentMessage = null;
@@ -219,13 +244,14 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
             @SuppressWarnings("unchecked")
             S m = (S) msg;
 
+            // 100-continue需要持续响应
             // Send the continue response if necessary (e.g. 'Expect: 100-continue' header)
             // Check before content length. Failing an expectation may result in a different response being sent.
             Object continueResponse = newContinueResponse(m, maxContentLength, ctx.pipeline());
-            if (continueResponse != null) {
+            if (continueResponse != null) {//有 100-continue响应
                 // Cache the write listener for reuse.
                 ChannelFutureListener listener = continueResponseWriteListener;
-                if (listener == null) {
+                if (listener == null) {//不存在监听器要创建一个
                     continueResponseWriteListener = listener = new ChannelFutureListener() {
                         @Override
                         public void operationComplete(ChannelFuture future) throws Exception {
@@ -240,6 +266,7 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
                 boolean closeAfterWrite = closeAfterContinueResponse(continueResponse);
                 handlingOversizedMessage = ignoreContentAfterContinueResponse(continueResponse);
 
+                //这里会直接刷出去，所以HttpResponseEncoder需要放在这个前面，不然写出去没编码过会报错的
                 final ChannelFuture future = ctx.writeAndFlush(continueResponse).addListener(listener);
 
                 if (closeAfterWrite) {
@@ -249,12 +276,14 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
                 if (handlingOversizedMessage) {
                     return;
                 }
+            //消息体长度是否超过了
             } else if (isContentLengthInvalid(m, maxContentLength)) {
                 // if content length is set, preemptively close if it's too large
                 invokeHandleOversizedMessage(ctx, m);
                 return;
             }
 
+            //解码不成功
             if (m instanceof DecoderResultProvider && !((DecoderResultProvider) m).decoderResult().isSuccess()) {
                 O aggregated;
                 if (m instanceof ByteBufHolder) {
@@ -268,24 +297,28 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
             }
 
             // A streamed message - initialize the cumulative buffer, and wait for incoming chunks.
+            //创建复合缓冲区
             CompositeByteBuf content = ctx.alloc().compositeBuffer(maxCumulationBufferComponents);
-            if (m instanceof ByteBufHolder) {
+            if (m instanceof ByteBufHolder) {//是内容
                 appendPartialContent(content, ((ByteBufHolder) m).content());
             }
+            //开始聚合
             currentMessage = beginAggregation(m, content);
-        } else if (isContentMessage(msg)) {
-            if (currentMessage == null) {
+        } else if (isContentMessage(msg)) {//后面属于消息体聚合
+            if (currentMessage == null) {//长度超过最大了，直接丢弃了，不处理了
                 // it is possible that a TooLongFrameException was already thrown but we can still discard data
                 // until the begging of the next request/response.
                 return;
             }
 
             // Merge the received chunk into the content of the current message.
+            //提取内容
             CompositeByteBuf content = (CompositeByteBuf) currentMessage.content();
 
             @SuppressWarnings("unchecked")
             final C m = (C) msg;
             // Handle oversized message.
+            // 超过最大长度了，处理过大的消息
             if (content.readableBytes() > maxContentLength - m.content().readableBytes()) {
                 // By convention, full message type extends first message type.
                 @SuppressWarnings("unchecked")
@@ -295,14 +328,19 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
             }
 
             // Append the content of the chunk.
+            //添加新的内容到复合缓冲区
             appendPartialContent(content, m.content());
 
             // Give the subtypes a chance to merge additional information such as trailing headers.
+            //整合尾部请求头
             aggregate(currentMessage, m);
 
+            //是不是最后一次聚合
             final boolean last;
+            //处理解码结果
             if (m instanceof DecoderResultProvider) {
                 DecoderResult decoderResult = ((DecoderResultProvider) m).decoderResult();
+                //没解码成功
                 if (!decoderResult.isSuccess()) {
                     if (currentMessage instanceof DecoderResultProvider) {
                         ((DecoderResultProvider) currentMessage).setDecoderResult(
@@ -310,12 +348,14 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
                     }
                     last = true;
                 } else {
+                    //是否是最后的内容
                     last = isLastContentMessage(m);
                 }
             } else {
                 last = isLastContentMessage(m);
             }
 
+            //是最后的
             if (last) {
                 finishAggregation0(currentMessage);
 
@@ -328,7 +368,9 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
         }
     }
 
+    //将内容添加到复合缓冲区里
     private static void appendPartialContent(CompositeByteBuf content, ByteBuf partialContent) {
+        //可读的话就加进去
         if (partialContent.isReadable()) {
             content.addComponent(true, partialContent.retain());
         }
@@ -387,8 +429,10 @@ public abstract class MessageAggregator<I, S, C extends ByteBufHolder, O extends
      */
     protected void aggregate(O aggregated, C content) throws Exception { }
 
+    //完成聚合
     private void finishAggregation0(O aggregated) throws Exception {
         aggregating = false;
+        // 检查一下头信息，对于http，就是检查Content-Length
         finishAggregation(aggregated);
     }
 

@@ -130,51 +130,68 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
     public static final int DEFAULT_INITIAL_BUFFER_SIZE = 128;
     public static final boolean DEFAULT_ALLOW_DUPLICATE_CONTENT_LENGTHS = false;
 
+    //请求头空值
     private static final String EMPTY_VALUE = "";
     private static final Pattern COMMA_PATTERN = Pattern.compile(",");
 
+    //块的最大长度
     private final int maxChunkSize;
+    //是否支持分块chunk发送
     private final boolean chunkedSupported;
+    //是否验证头名字合法性
     protected final boolean validateHeaders;
+    // 是否支持多长度
     private final boolean allowDuplicateContentLengths;
+    //请求头解析器
     private final HeaderParser headerParser;
+    //换行符解析器
     private final LineParser lineParser;
 
+    //请求的消息，包括请求行和请求头
     private HttpMessage message;
+    //保存下一次要读的消息体长度
     private long chunkSize;
+    //消息体长度
     private long contentLength = Long.MIN_VALUE;
+    //重置请求
     private volatile boolean resetRequested;
 
     // These will be updated by splitHeader(...)
+    //头名字
     private CharSequence name;
+    //头的值
     private CharSequence value;
 
+    //请求体结尾
     private LastHttpContent trailer;
 
     /**
      * The internal state of {@link HttpObjectDecoder}.
      * <em>Internal use only</em>.
+     * 状态
      */
     private enum State {
-        SKIP_CONTROL_CHARS,
-        READ_INITIAL,
-        READ_HEADER,
-        READ_VARIABLE_LENGTH_CONTENT,
-        READ_FIXED_LENGTH_CONTENT,
-        READ_CHUNK_SIZE,
-        READ_CHUNKED_CONTENT,
-        READ_CHUNK_DELIMITER,
-        READ_CHUNK_FOOTER,
-        BAD_MESSAGE,
-        UPGRADED
+        SKIP_CONTROL_CHARS,//检查控制字符
+        READ_INITIAL,//开始读取
+        READ_HEADER,//读取头
+        READ_VARIABLE_LENGTH_CONTENT,//读取可变长内容，用于chunk传输
+        READ_FIXED_LENGTH_CONTENT,//读取固定长内容 用于Content-Length
+        READ_CHUNK_SIZE,//chunk传输的每个chunk尺寸
+        READ_CHUNKED_CONTENT,//每个chunk内容
+        READ_CHUNK_DELIMITER,//chunk分割
+        READ_CHUNK_FOOTER,//最后一个chunk
+        BAD_MESSAGE,//无效消息
+        UPGRADED//协议切换
     }
 
+    // 当前状态
     private State currentState = State.SKIP_CONTROL_CHARS;
 
     /**
      * Creates a new instance with the default
      * {@code maxInitialLineLength (4096}}, {@code maxHeaderSize (8192)}, and
      * {@code maxChunkSize (8192)}.
+     * 参数对应 一行最大长度，请求头的最大长度，请求体或者某个块的最大长度，是否支持chunk块传输
      */
     protected HttpObjectDecoder() {
         this(DEFAULT_MAX_INITIAL_LINE_LENGTH, DEFAULT_MAX_HEADER_SIZE, DEFAULT_MAX_CHUNK_SIZE,
@@ -217,6 +234,8 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         checkPositive(maxHeaderSize, "maxHeaderSize");
         checkPositive(maxChunkSize, "maxChunkSize");
 
+        // 可添加的字符序列
+        //这个底层是一个字符数组，可以动态添加到最后
         AppendableCharSequence seq = new AppendableCharSequence(initialBufferSize);
         lineParser = new LineParser(seq, maxInitialLineLength);
         headerParser = new HeaderParser(seq, maxHeaderSize);
@@ -226,6 +245,15 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         this.allowDuplicateContentLengths = allowDuplicateContentLengths;
     }
 
+    /**
+     * 这个是最核心的方法，包括了解析请求行，请求头，请求体，
+     * 但是会将请求行和请求头整合起来形成一个请求DefaultHttpRequest传递到后面，
+     * 把请求体再封装成消息体传递到后面，
+     * 因为请求体可能很大，所以也可能会有多次封装，那后面处理器就可能收到多次消息体。
+     * 如果是GET的话是没有消息体的，首先收到一个DefaultHttpRequest，然后是一个空的LastHttpContent。
+     * 如果是POST的话，先收到DefaultHttpRequest，
+     * 然后可能多个内容DefaultHttpContent和一个DefaultLastHttpContent
+     */
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf buffer, List<Object> out) throws Exception {
         if (resetRequested) {
@@ -233,81 +261,107 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         }
 
         switch (currentState) {
+        //检查并略过控制字符  类似回车换行，空格这种
         case SKIP_CONTROL_CHARS:
             // Fall-through
-        case READ_INITIAL: try {
-            AppendableCharSequence line = lineParser.parse(buffer);
-            if (line == null) {
-                return;
-            }
-            String[] initialLine = splitInitialLine(line);
-            if (initialLine.length < 3) {
-                // Invalid initial line - ignore.
-                currentState = State.SKIP_CONTROL_CHARS;
-                return;
-            }
-
-            message = createMessage(initialLine);
-            currentState = State.READ_HEADER;
-            // fall-through
-        } catch (Exception e) {
-            out.add(invalidMessage(buffer, e));
-            return;
-        }
-        case READ_HEADER: try {
-            State nextState = readHeaders(buffer);
-            if (nextState == null) {
-                return;
-            }
-            currentState = nextState;
-            switch (nextState) {
-            case SKIP_CONTROL_CHARS:
-                // fast-path
-                // No content is expected.
-                out.add(message);
-                out.add(LastHttpContent.EMPTY_LAST_CONTENT);
-                resetNow();
-                return;
-            case READ_CHUNK_SIZE:
-                if (!chunkedSupported) {
-                    throw new IllegalArgumentException("Chunked messages not supported");
+        //开始读取
+        //会开始读取一行，如果没有读到换行符，可能是因为数据还没收全，那就什么都不做，返回。
+        //否则就开始分割，分割出方法，URI，协议，当然如果请求头无效，就不管了，重新返回到SKIP_CONTROL_CHARS状态。
+        // 如果是有效的，就封装成请求消息HttpMessage包括请求行和请求头信息，讲状态切换到READ_HEADER读头信息
+        case READ_INITIAL:
+            //读取请求行
+            try {
+                //解析一行数据
+                AppendableCharSequence line = lineParser.parse(buffer);
+                //没解析到换行符
+                if (line == null) {
+                    return;
                 }
-                // Chunked encoding - generate HttpMessage first.  HttpChunks will follow.
-                out.add(message);
-                return;
-            default:
-                /**
-                 * <a href="https://tools.ietf.org/html/rfc7230#section-3.3.3">RFC 7230, 3.3.3</a> states that if a
-                 * request does not have either a transfer-encoding or a content-length header then the message body
-                 * length is 0. However for a response the body length is the number of octets received prior to the
-                 * server closing the connection. So we treat this as variable length chunked encoding.
-                 */
-                long contentLength = contentLength();
-                if (contentLength == 0 || contentLength == -1 && isDecodingRequest()) {
-                    out.add(message);
-                    out.add(LastHttpContent.EMPTY_LAST_CONTENT);
-                    resetNow();
+                //行分割后的数组
+                String[] initialLine = splitInitialLine(line);
+                //小于3个就说明格式(方法 URI 版本)不对，直接忽略
+                if (initialLine.length < 3) {
+                    // Invalid initial line - ignore.
+                    currentState = State.SKIP_CONTROL_CHARS;
                     return;
                 }
 
-                assert nextState == State.READ_FIXED_LENGTH_CONTENT ||
-                        nextState == State.READ_VARIABLE_LENGTH_CONTENT;
-
-                out.add(message);
-
-                if (nextState == State.READ_FIXED_LENGTH_CONTENT) {
-                    // chunkSize will be decreased as the READ_FIXED_LENGTH_CONTENT state reads data chunk by chunk.
-                    chunkSize = contentLength;
-                }
-
-                // We return here, this forces decode to be called again where we will decode the content
+                //创建请求消息
+                message = createMessage(initialLine);
+                currentState = State.READ_HEADER;
+            // fall-through
+            } catch (Exception e) {
+                //invalidMessage无效消息
+                out.add(invalidMessage(buffer, e));
                 return;
             }
-        } catch (Exception e) {
-            out.add(invalidMessage(buffer, e));
-            return;
-        }
+        // 请求头
+        case READ_HEADER:
+            //读取请求头
+            try {
+                State nextState = readHeaders(buffer);
+                if (nextState == null) {
+                    return;
+                }
+                currentState = nextState;
+                switch (nextState) {
+                    //没有内容，直接传递两个消息
+                    case SKIP_CONTROL_CHARS:
+                        // fast-path
+                        // No content is expected.
+                        out.add(message);
+                        // 空内容
+                        out.add(LastHttpContent.EMPTY_LAST_CONTENT);
+                        resetNow();
+                        return;
+                    //块协议传递
+                    case READ_CHUNK_SIZE:
+                        if (!chunkedSupported) {
+                            throw new IllegalArgumentException("Chunked messages not supported");
+                        }
+                        // Chunked encoding - generate HttpMessage first.  HttpChunks will follow.
+                        out.add(message);
+                        return;
+                    default:
+                        /**
+                         * <a href="https://tools.ietf.org/html/rfc7230#section-3.3.3">RFC 7230, 3.3.3</a> states that if a
+                         * request does not have either a transfer-encoding or a content-length header then the message body
+                         * length is 0. However for a response the body length is the number of octets received prior to the
+                         * server closing the connection. So we treat this as variable length chunked encoding.
+                         */
+                        //没有transfer-encoding或者content-length头 表示没消息体，比如GET请求
+                        long contentLength = contentLength();
+                        //没消息体，直接就补一个空消息体
+                        if (contentLength == 0 || contentLength == -1 && isDecodingRequest()) {
+                            out.add(message);//消息行和消息头
+                            out.add(LastHttpContent.EMPTY_LAST_CONTENT);//空消息体
+                            resetNow();//重置属性
+                            return;
+                        }
+
+                        assert nextState == State.READ_FIXED_LENGTH_CONTENT ||
+                                nextState == State.READ_VARIABLE_LENGTH_CONTENT;
+
+                        //有消息体，就先放入行和头信息，下一次解码再进行消息体的读取
+                        out.add(message);
+
+                        if (nextState == State.READ_FIXED_LENGTH_CONTENT) {
+                            // chunkSize will be decreased as the READ_FIXED_LENGTH_CONTENT state reads data chunk by chunk.
+                            //如果是固定长度的消息体，要保存下一次要读的消息体长度
+                            chunkSize = contentLength;
+                        }
+
+                        // We return here, this forces decode to be called again where we will decode the content
+                        return;
+                    }
+            } catch (Exception e) {
+                //异常了就无效
+                out.add(invalidMessage(buffer, e));
+                return;
+            }
+        //读取可变长内容
         case READ_VARIABLE_LENGTH_CONTENT: {
+            //直接读取可读的字节，然后封装成DefaultHttpContent内容传递
             // Keep reading data as a chunk until the end of connection is reached.
             int toRead = Math.min(buffer.readableBytes(), maxChunkSize);
             if (toRead > 0) {
@@ -316,6 +370,10 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             }
             return;
         }
+        //读取固定长内容
+        //固定长度就是有contentLength，读取长度，
+        // 如果等于记录的长度chunkSize ，就表示读完了，直接传递最后内容DefaultLastHttpContent。
+        // 否则说明没读完，就传递内容DefaultHttpContent
         case READ_FIXED_LENGTH_CONTENT: {
             int readLimit = buffer.readableBytes();
 
@@ -329,18 +387,24 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
                 return;
             }
 
+            //读取的个数
             int toRead = Math.min(readLimit, maxChunkSize);
+            //如果大于块长度chunkSize，就读chunkSize个
             if (toRead > chunkSize) {
                 toRead = (int) chunkSize;
             }
             ByteBuf content = buffer.readRetainedSlice(toRead);
             chunkSize -= toRead;
 
+            //块全部读完了
             if (chunkSize == 0) {
                 // Read all content.
+                //创建最后一个内容体，返回
                 out.add(new DefaultLastHttpContent(content, validateHeaders));
+                //重置参数
                 resetNow();
             } else {
+                //还没读完，就创建一个消息体
                 out.add(new DefaultHttpContent(content));
             }
             return;
@@ -348,48 +412,68 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         /**
          * everything else after this point takes care of reading chunked content. basically, read chunk size,
          * read chunk, read and ignore the CRLF and repeat until 0
+         * 读取块大小
+         * 如果是chunk块传输，根据块传输协议，就应该是获取块大小
          */
-        case READ_CHUNK_SIZE: try {
-            AppendableCharSequence line = lineParser.parse(buffer);
-            if (line == null) {
+        case READ_CHUNK_SIZE:
+            try {
+                AppendableCharSequence line = lineParser.parse(buffer);
+                if (line == null) {
+                    return;
+                }
+                //获取块尺寸
+                int chunkSize = getChunkSize(line.toString());
+                //块长度
+                this.chunkSize = chunkSize;
+                //读到块结束标记 0\r\n
+                if (chunkSize == 0) {
+                    currentState = State.READ_CHUNK_FOOTER;
+                    return;
+                }
+                //继续读内容
+                currentState = State.READ_CHUNKED_CONTENT;
+                // fall-through
+            } catch (Exception e) {
+                //无效块
+                out.add(invalidChunk(buffer, e));
                 return;
             }
-            int chunkSize = getChunkSize(line.toString());
-            this.chunkSize = chunkSize;
-            if (chunkSize == 0) {
-                currentState = State.READ_CHUNK_FOOTER;
-                return;
-            }
-            currentState = State.READ_CHUNKED_CONTENT;
-            // fall-through
-        } catch (Exception e) {
-            out.add(invalidChunk(buffer, e));
-            return;
-        }
+        //读取块内容
+        //根据块长度chunkSize读取字节，
+        // 如果读取长度等于chunkSize，表示读完了，需要读取分隔符，也就是换车换行了，
+        // 状态转到READ_CHUNK_DELIMITER，
+        // 否则就将读取的内容，封装成DefaultHttpContent传递下去，然后下一次继续读取内容
         case READ_CHUNKED_CONTENT: {
+            //读取块内容，其实没读取，只是用切片，从切片读，不影响原来的
             assert chunkSize <= Integer.MAX_VALUE;
             int toRead = Math.min((int) chunkSize, maxChunkSize);
             toRead = Math.min(toRead, buffer.readableBytes());
             if (toRead == 0) {
                 return;
             }
+            //创建一个块，里面放的是切片
             HttpContent chunk = new DefaultHttpContent(buffer.readRetainedSlice(toRead));
             chunkSize -= toRead;
 
             out.add(chunk);
 
             if (chunkSize != 0) {
+                //当前块还没接受完，就返回
                 return;
             }
+            //接受完，找到块分割符
             currentState = State.READ_CHUNK_DELIMITER;
             // fall-through
         }
+        //读取块分隔符 回车换行符，找到了就转到READ_CHUNK_SIZE继续去取下一个块长度
         case READ_CHUNK_DELIMITER: {
             final int wIdx = buffer.writerIndex();
             int rIdx = buffer.readerIndex();
             while (wIdx > rIdx) {
                 byte next = buffer.getByte(rIdx++);
+                //找到换行符，继续读下一个块的大小
                 if (next == HttpConstants.LF) {
+                    // 转到READ_CHUNK_SIZE
                     currentState = State.READ_CHUNK_SIZE;
                     break;
                 }
@@ -397,23 +481,35 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             buffer.readerIndex(rIdx);
             return;
         }
-        case READ_CHUNK_FOOTER: try {
-            LastHttpContent trailer = readTrailingHeaders(buffer);
-            if (trailer == null) {
+        //读最后一个块
+        case READ_CHUNK_FOOTER:
+            //如果读取的块长度chunkSize=0的话，就说明是最后一个块了，
+            // 然后要看下是否还有头信息在后面，有头信息的话会封装成DefaultLastHttpContent，
+            // 如果没有的话头信息就是LastHttpContent.EMPTY_LAST_CONTENT
+            try {
+                //读取最后的内容，可能有头信息，也可能没有
+                LastHttpContent trailer = readTrailingHeaders(buffer);
+                //还没结束的，继续
+                if (trailer == null) {
+                    return;
+                }
+                //添加最后内容
+                out.add(trailer);
+                // 重置
+                resetNow();
+                return;
+            } catch (Exception e) {
+                out.add(invalidChunk(buffer, e));
                 return;
             }
-            out.add(trailer);
-            resetNow();
-            return;
-        } catch (Exception e) {
-            out.add(invalidChunk(buffer, e));
-            return;
-        }
+        //无效消息
         case BAD_MESSAGE: {
             // Keep discarding until disconnection.
+            //坏消息，直接略过，不读
             buffer.skipBytes(buffer.readableBytes());
             break;
         }
+        //协议切换
         case UPGRADED: {
             int readableBytes = buffer.readableBytes();
             if (readableBytes > 0) {
@@ -546,6 +642,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         lineParser.reset();
         headerParser.reset();
         trailer = null;
+        //不是请求解码，如果要升级协议
         if (!isDecodingRequest()) {
             HttpResponse res = (HttpResponse) message;
             if (res != null && isSwitchingToNonHttp1Protocol(res)) {
@@ -558,16 +655,23 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         currentState = State.SKIP_CONTROL_CHARS;
     }
 
+    //创建一个无效消息，
+    // 状态直接为BAD_MESSAGE无效，把缓冲区内的数据直接都略过，
+    // 如果请求消息没创建好，就创建一个，然后设置失败结果并带上异常信息返回。
     private HttpMessage invalidMessage(ByteBuf in, Exception cause) {
+        //设置无效数据，这样后面同一个消息的数据都会被略过
         currentState = State.BAD_MESSAGE;
 
         // Advance the readerIndex so that ByteToMessageDecoder does not complain
         // when we produced an invalid message without consuming anything.
+        //直接不可读，略过可读数据
         in.skipBytes(in.readableBytes());
 
         if (message == null) {
+            //直接返回完整的请求消息，参数设置成有问题的就可以了. 子类实现
             message = createInvalidMessage();
         }
+        //设置失败
         message.setDecoderResult(DecoderResult.failure(cause));
 
         HttpMessage ret = message;
@@ -589,10 +693,20 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         return chunk;
     }
 
+    //主要就是按行解析头消息，然后进行头信息分割，然后放入headers ，
+    // 最后根据content-length来决定后面的状态，
+    // 是读取固定长READ_FIXED_LENGTH_CONTENT
+    // 还是可变长READ_VARIABLE_LENGTH_CONTENT，
+    // 还是是读取块大小READ_CHUNK_SIZE
+
+    // 如果是HTTP1.1一个头只能对应一个值，而且Content-Length和Transfer-Encoding不能同时存在。
+    // http1.0以及之前或者http1.1没设置keepalive的话Content-Length可有可无
     private State readHeaders(ByteBuf buffer) {
         final HttpMessage message = this.message;
+        //获得请求头
         final HttpHeaders headers = message.headers();
 
+        //解析请求头
         AppendableCharSequence line = headerParser.parse(buffer);
         if (line == null) {
             return null;
@@ -608,11 +722,14 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
                     value = valueStr + ' ' + trimmedLine;
                 } else {
                     if (name != null) {
+                        //如果名字解析出来表示值也出来了，就添加进去
                         headers.add(name, value);
                     }
+                    //分割请求头
                     splitHeader(line);
                 }
 
+                //继续解析头
                 line = headerParser.parse(buffer);
                 if (line == null) {
                     return null;
@@ -621,16 +738,20 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         }
 
         // Add the last header.
+        //添加最后一个
         if (name != null) {
             headers.add(name, value);
         }
 
         // reset name and value fields
+        // 重置
         name = null;
         value = null;
 
+        //找content-length头信息
         List<String> contentLengthFields = headers.getAll(HttpHeaderNames.CONTENT_LENGTH);
 
+        // 有content-length
         if (!contentLengthFields.isEmpty()) {
             // Guard against multiple Content-Length headers as stated in
             // https://tools.ietf.org/html/rfc7230#section-3.3.2:
@@ -645,13 +766,17 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             //   duplicated field-values with a single valid Content-Length field
             //   containing that decimal value prior to determining the message body
             //   length or forwarding the message.
+            // 是否多个
             boolean multipleContentLengths =
                     contentLengthFields.size() > 1 || contentLengthFields.get(0).indexOf(COMMA) >= 0;
+            // 多个，并且版本是1.1
             if (multipleContentLengths && message.protocolVersion() == HttpVersion.HTTP_1_1) {
+                // 支持多长度
                 if (allowDuplicateContentLengths) {
                     // Find and enforce that all Content-Length values are the same
                     String firstValue = null;
                     for (String field : contentLengthFields) {
+                        // 分割
                         String[] tokens = COMMA_PATTERN.split(field, -1);
                         for (String token : tokens) {
                             String trimmed = token.trim();
@@ -664,7 +789,9 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
                         }
                     }
                     // Replace the duplicated field-values with a single valid Content-Length field
+                    // 取一个
                     headers.set(HttpHeaderNames.CONTENT_LENGTH, firstValue);
+                    // 设置消息体长度
                     contentLength = Long.parseLong(firstValue);
                 } else {
                     // Reject the message as invalid
@@ -672,21 +799,27 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
                             "Multiple Content-Length values found: " + contentLengthFields);
                 }
             } else {
+                // 只有一个，设置消息体长度
                 contentLength = Long.parseLong(contentLengthFields.get(0));
             }
         }
 
+        //空内容
         if (isContentAlwaysEmpty(message)) {
-            HttpUtil.setTransferEncodingChunked(message, false);
+            HttpUtil.setTransferEncodingChunked(message, false);//不开启块传输
             return State.SKIP_CONTROL_CHARS;
         } else if (HttpUtil.isTransferEncodingChunked(message)) {
+            //HTTP_1_1如果开启了块协议，就不能设置Content-Length了
             if (!contentLengthFields.isEmpty() && message.protocolVersion() == HttpVersion.HTTP_1_1) {
                 handleTransferEncodingChunkedWithContentLength(message);
             }
+            //块传输，要获取大小
             return State.READ_CHUNK_SIZE;
         } else if (contentLength() >= 0) {
+            //可以固定长度解析消息体
             return State.READ_FIXED_LENGTH_CONTENT;
         } else {
+            //可变长度解析，或者没有Content-Length，http1.0以及之前或者1.1 非keep alive,Content-Length可有可无
             return State.READ_VARIABLE_LENGTH_CONTENT;
         }
     }
@@ -724,12 +857,17 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         return contentLength;
     }
 
+    //会去读取一行，如果没读出来换行，表示可能没收到数据，也就是没读完，那就返回，继续下一次。
+    //如果读出来发现就只有回车换行，那就说明没有头信息，结束了，就返回一个 LastHttpContent.EMPTY_LAST_CONTENT，
+    // 否则的话就创建一个DefaultLastHttpContent内容，然后进行头信息的解析，解析出来的头信息就放入内容中，并返回内容
     private LastHttpContent readTrailingHeaders(ByteBuf buffer) {
         AppendableCharSequence line = headerParser.parse(buffer);
+        //没有换行，表示没读完呢
         if (line == null) {
             return null;
         }
         LastHttpContent trailer = this.trailer;
+        //直接读到\r\n 即读到空行，表示结束,无头信息，返回空内容
         if (line.length() == 0 && trailer == null) {
             // We have received the empty line which signals the trailer is complete and did not parse any trailers
             // before. Just return an empty last content to reduce allocations.
@@ -738,8 +876,9 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
 
         CharSequence lastHeader = null;
         if (trailer == null) {
-            trailer = this.trailer = new DefaultLastHttpContent(Unpooled.EMPTY_BUFFER, validateHeaders);
+            trailer = this.trailer = new DefaultLastHttpContent(Unpooled.EMPTY_BUFFER, validateHeaders);//空内容
         }
+        //chunk最后可能还有头信息 key: v \r\n
         while (line.length() > 0) {
             char firstChar = line.charAtUnsafe(0);
             if (lastHeader != null && (firstChar == ' ' || firstChar == '\t')) {
@@ -753,6 +892,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
                     current.set(lastPos, currentLastPos + lineTrimmed);
                 }
             } else {
+                //解析头信息
                 splitHeader(line);
                 CharSequence headerName = name;
                 if (!HttpHeaderNames.CONTENT_LENGTH.contentEqualsIgnoreCase(headerName) &&
@@ -779,6 +919,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
     protected abstract HttpMessage createMessage(String[] initialLine) throws Exception;
     protected abstract HttpMessage createInvalidMessage();
 
+    //这里连;，空格，控制字符都算截止符了
     private static int getChunkSize(String hex) {
         hex = hex.trim();
         for (int i = 0; i < hex.length(); i ++) {
@@ -792,6 +933,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         return Integer.parseInt(hex, 16);
     }
 
+    //执行了3次检测，刚好把请求行给分割出来，最后用字符串切割出来封装成数组返回
     private static String[] splitInitialLine(AppendableCharSequence sb) {
         int aStart;
         int aEnd;
@@ -800,7 +942,9 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
         int cStart;
         int cEnd;
 
+        //找出不是空格的第一个索引
         aStart = findNonSPLenient(sb, 0);
+        //找出空格索引
         aEnd = findSPLenient(sb, aStart);
 
         bStart = findNonSPLenient(sb, aEnd);
@@ -925,8 +1069,11 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
     }
 
     private static class HeaderParser implements ByteProcessor {
+        //可添加的字符序列
         private final AppendableCharSequence seq;
+        //最大长度
         private final int maxLength;
+        //索引
         private int size;
 
         HeaderParser(AppendableCharSequence seq, int maxLength) {
@@ -934,10 +1081,13 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             this.maxLength = maxLength;
         }
 
+        //解析缓冲区
         public AppendableCharSequence parse(ByteBuf buffer) {
             final int oldSize = size;
             seq.reset();
+            // 这里将处理器传进去，会调用下面的process方法，如果遇到换行符，会返回相应的索引，如果没有返回-1
             int i = buffer.forEachByte(this);
+            // 没读到换行，或者报异常了
             if (i == -1) {
                 size = oldSize;
                 return null;
@@ -946,16 +1096,20 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             return seq;
         }
 
+        //读到的字符个数清零
         public void reset() {
             size = 0;
         }
 
+        //处理数据，遇到换行了就结束
         @Override
         public boolean process(byte value) throws Exception {
             char nextByte = (char) (value & 0xFF);
+            //遇到换行符
             if (nextByte == HttpConstants.LF) {
                 int len = seq.length();
                 // Drop CR if we had a CRLF pair
+                //遇到回车符
                 if (len >= 1 && seq.charAtUnsafe(len - 1) == HttpConstants.CR) {
                     -- size;
                     seq.setLength(len - 1);
@@ -965,11 +1119,13 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
 
             increaseCount();
 
+            //添加
             seq.append(nextByte);
             return true;
         }
 
         protected final void increaseCount() {
+            //溢出了
             if (++ size > maxLength) {
                 // TODO: Respond with Bad Request and discard the traffic
                 //    or close the connection.
@@ -979,11 +1135,13 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             }
         }
 
+        // 头消息过大异常
         protected TooLongFrameException newException(int maxLength) {
             return new TooLongFrameException("HTTP header is larger than " + maxLength + " bytes.");
         }
     }
 
+    //继承了头解析器，只是解析的时候要reset一下，就是把读到的个数清0，因为是一行行读，每次读完一行就得清理个数
     private final class LineParser extends HeaderParser {
 
         LineParser(AppendableCharSequence seq, int maxLength) {
@@ -992,6 +1150,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
 
         @Override
         public AppendableCharSequence parse(ByteBuf buffer) {
+            //从头开始，要重置索引
             reset();
             return super.parse(buffer);
         }

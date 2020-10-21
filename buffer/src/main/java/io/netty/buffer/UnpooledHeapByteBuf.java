@@ -31,14 +31,18 @@ import java.nio.channels.ScatteringByteChannel;
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 /**
+ * 非池化的堆缓冲区，也就是内存在java堆里
  * Big endian Java heap buffer implementation. It is recommended to use
  * {@link UnpooledByteBufAllocator#heapBuffer(int, int)}, {@link Unpooled#buffer(int)} and
  * {@link Unpooled#wrappedBuffer(byte[])} instead of calling the constructor explicitly.
  */
 public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
 
+    //缓冲区分配器
     private final ByteBufAllocator alloc;
+    //内部是字节数组
     byte[] array;
+    //用ByteBuffer来包装array数组
     private ByteBuffer tmpNioBuf;
 
     /**
@@ -81,6 +85,7 @@ public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
         setIndex(0, initialArray.length);
     }
 
+    //申请字节数组空间
     protected byte[] allocateArray(int initialCapacity) {
         return new byte[initialCapacity];
     }
@@ -89,6 +94,7 @@ public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
         // NOOP
     }
 
+    //设置数组
     private void setArray(byte[] initialArray) {
         array = initialArray;
         tmpNioBuf = null;
@@ -99,6 +105,8 @@ public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
         return alloc;
     }
 
+    // 从网络里面获取的字节系默认是大端的
+    //大端字节序
     @Override
     public ByteOrder order() {
         return ByteOrder.BIG_ENDIAN;
@@ -124,15 +132,18 @@ public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
         }
 
         int bytesToCopy;
+        //增加容量
         if (newCapacity > oldCapacity) {
             bytesToCopy = oldCapacity;
-        } else {
+        } else { //减少容量
             trimIndicesToCapacity(newCapacity);
             bytesToCopy = newCapacity;
         }
         byte[] newArray = allocateArray(newCapacity);
+        //数组拷贝
         System.arraycopy(oldArray, 0, newArray, 0, bytesToCopy);
         setArray(newArray);
+        //空方法，gc去释放
         freeArray(oldArray);
         return this;
     }
@@ -535,6 +546,7 @@ public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
         return alloc().heapBuffer(length, maxCapacity()).writeBytes(array, index, length);
     }
 
+    // 这个就是将数据包装成ByteBuffer。
     private ByteBuffer internalNioBuffer() {
         ByteBuffer tmpNioBuf = this.tmpNioBuf;
         if (tmpNioBuf == null) {

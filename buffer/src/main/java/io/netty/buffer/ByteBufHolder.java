@@ -29,11 +29,13 @@ public interface ByteBufHolder extends ReferenceCounted {
 
     /**
      * Creates a deep copy of this {@link ByteBufHolder}.
+     * 深拷贝一份
      */
     ByteBufHolder copy();
 
     /**
      * Duplicates this {@link ByteBufHolder}. Be aware that this will not automatically call {@link #retain()}.
+     *  浅拷贝副本
      */
     ByteBufHolder duplicate();
 
@@ -41,11 +43,13 @@ public interface ByteBufHolder extends ReferenceCounted {
      * Duplicates this {@link ByteBufHolder}. This method returns a retained duplicate unlike {@link #duplicate()}.
      *
      * @see ByteBuf#retainedDuplicate()
+     *  保留的这个副本
      */
     ByteBufHolder retainedDuplicate();
 
     /**
      * Returns a new {@link ByteBufHolder} which contains the specified {@code content}.
+     * 创建一个新的
      */
     ByteBufHolder replace(ByteBuf content);
 

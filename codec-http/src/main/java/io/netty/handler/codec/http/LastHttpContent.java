@@ -21,6 +21,7 @@ import io.netty.handler.codec.DecoderResult;
 
 /**
  * The last {@link HttpContent} which has trailing headers.
+ * 最后接受的一个消息体，头信息是空的。
  */
 public interface LastHttpContent extends HttpContent {
 

@@ -113,6 +113,7 @@ public final class SocketUtils {
 
     public static SocketChannel accept(final ServerSocketChannel serverSocketChannel) throws IOException {
         try {
+            // 这个最终就是调用了serverSocketChannel.accept()，只是现在已经有连接了，所以不会阻塞，直接返回一个SocketChannel了
             return AccessController.doPrivileged(new PrivilegedExceptionAction<SocketChannel>() {
                 @Override
                 public SocketChannel run() throws IOException {

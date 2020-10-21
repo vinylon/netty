@@ -184,6 +184,11 @@ public abstract class WebSocketServerHandshaker {
      *            the {@link ChannelPromise} to be notified when the opening handshake is done
      * @return future
      *            the {@link ChannelFuture} which is notified when the opening handshake is done
+     * 握手对象进行握手，其实就是发送响应数据。
+     * 先会创建一个FullHttpResponse 响应，然后把跟HTTP相关的聚合，压缩处理器删除，
+     * 如果有HttpServerCodec，那就在前面添加websocket的编解码器，
+     * 等发送响应成功了把HttpServerCodec删了。
+     * 如果是HTTP编解码器，就把解码器先替换成websocket的解码器，等发送响应成功了，再把编码器替换成websocket的编码器。
      */
     public final ChannelFuture handshake(Channel channel, FullHttpRequest req,
                                             HttpHeaders responseHeaders, final ChannelPromise promise) {
@@ -191,38 +196,50 @@ public abstract class WebSocketServerHandshaker {
         if (logger.isDebugEnabled()) {
             logger.debug("{} WebSocket version {} server handshake", channel, version());
         }
+        //创建响应
         FullHttpResponse response = newHandshakeResponse(req, responseHeaders);
         ChannelPipeline p = channel.pipeline();
         if (p.get(HttpObjectAggregator.class) != null) {
+            //删除聚合
             p.remove(HttpObjectAggregator.class);
         }
         if (p.get(HttpContentCompressor.class) != null) {
+            //删除压缩
             p.remove(HttpContentCompressor.class);
         }
+        //请求解码器
         ChannelHandlerContext ctx = p.context(HttpRequestDecoder.class);
         final String encoderName;
+        //不存在
         if (ctx == null) {
             // this means the user use an HttpServerCodec
+            //HttpServerCodec是否存在
             ctx = p.context(HttpServerCodec.class);
+            //也不存在，就没办法解码http了，失败了
             if (ctx == null) {
                 promise.setFailure(
                         new IllegalStateException("No HttpDecoder and no HttpServerCodec in the pipeline"));
                 return promise;
             }
+            //在之前添加WebSocket编解码
             p.addBefore(ctx.name(), "wsencoder", newWebSocketEncoder());
             p.addBefore(ctx.name(), "wsdecoder", newWebsocketDecoder());
             encoderName = ctx.name();
         } else {
+            //替换HttpRequestDecoder
             p.replace(ctx.name(), "wsdecoder", newWebsocketDecoder());
 
             encoderName = p.context(HttpResponseEncoder.class).name();
+            //在HttpResponseEncoder之前添加编码器
             p.addBefore(encoderName, "wsencoder", newWebSocketEncoder());
         }
+        //监听发出事件
         channel.writeAndFlush(response).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     ChannelPipeline p = future.channel().pipeline();
+                    //成功了就把http的编码器删除了，HttpServerCodec或者HttpResponseEncoder
                     p.remove(encoderName);
                     promise.setSuccess();
                 } else {

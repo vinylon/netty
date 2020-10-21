@@ -117,6 +117,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         return setFailure0(cause);
     }
 
+    //如果设置成功，就说明已经不可取消了，如果没有什么设置过就能设置成功，result变为UNCANCELLABLE对象
     @Override
     public boolean setUncancellable() {
         if (RESULT_UPDATER.compareAndSet(this, null, UNCANCELLABLE)) {
@@ -175,10 +176,12 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     public Promise<V> addListener(GenericFutureListener<? extends Future<? super V>> listener) {
         checkNotNull(listener, "listener");
 
+        //同步添加
         synchronized (this) {
             addListener0(listener);
         }
 
+        //如果完成了，就直接通知
         if (isDone()) {
             notifyListeners();
         }
@@ -235,20 +238,25 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public Promise<V> await() throws InterruptedException {
+        //完成了就返回
         if (isDone()) {
             return this;
         }
 
+        // 线程中断
         if (Thread.interrupted()) {
             throw new InterruptedException(toString());
         }
 
+        // 是否死锁 就是确定当前线程是否是IO线程
         checkDeadLock();
 
         synchronized (this) {
+            //判断是否完成
             while (!isDone()) {
                 incWaiters();
                 try {
+                    //阻塞
                     wait();
                 } finally {
                     decWaiters();
@@ -481,20 +489,21 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     private void notifyListeners() {
         EventExecutor executor = executor();
-        if (executor.inEventLoop()) {
+        if (executor.inEventLoop()) { // IO线程
             final InternalThreadLocalMap threadLocals = InternalThreadLocalMap.get();
             final int stackDepth = threadLocals.futureListenerStackDepth();
-            if (stackDepth < MAX_LISTENER_STACK_DEPTH) {
-                threadLocals.setFutureListenerStackDepth(stackDepth + 1);
+            if (stackDepth < MAX_LISTENER_STACK_DEPTH) {// 小于监听器栈的最大深度
+                threadLocals.setFutureListenerStackDepth(stackDepth + 1); // 深度+1
                 try {
-                    notifyListenersNow();
+                    notifyListenersNow(); // 立刻通知
                 } finally {
-                    threadLocals.setFutureListenerStackDepth(stackDepth);
+                    threadLocals.setFutureListenerStackDepth(stackDepth); // 通知完成深度设置回来
                 }
                 return;
             }
         }
 
+        // 非IO线程 提交任务
         safeExecute(executor, new Runnable() {
             @Override
             public void run() {
@@ -540,10 +549,12 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
             if (notifyingListeners || this.listeners == null) {
                 return;
             }
+            //设置已经通知
             notifyingListeners = true;
             listeners = this.listeners;
             this.listeners = null;
         }
+        //循环通知
         for (;;) {
             if (listeners instanceof DefaultFutureListeners) {
                 notifyListeners0((DefaultFutureListeners) listeners);
@@ -551,13 +562,13 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                 notifyListener0(this, (GenericFutureListener<?>) listeners);
             }
             synchronized (this) {
-                if (this.listeners == null) {
+                if (this.listeners == null) {//处理完了
                     // Nothing can throw from within this method, so setting notifyingListeners back to false does not
                     // need to be in a finally block.
-                    notifyingListeners = false;
+                    notifyingListeners = false;//设置回来，返回
                     return;
                 }
-                listeners = this.listeners;
+                listeners = this.listeners;//还有新的加进来了继续处理
                 this.listeners = null;
             }
         }
@@ -584,10 +595,13 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     private void addListener0(GenericFutureListener<? extends Future<? super V>> listener) {
         if (listeners == null) {
+            //没有监听器
             listeners = listener;
         } else if (listeners instanceof DefaultFutureListeners) {
+            //是DefaultFutureListeners就添加
             ((DefaultFutureListeners) listeners).add(listener);
         } else {
+            //创建一个，放进去
             listeners = new DefaultFutureListeners((GenericFutureListener<?>) listeners, listener);
         }
     }
@@ -612,6 +626,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         if (RESULT_UPDATER.compareAndSet(this, null, objResult) ||
             RESULT_UPDATER.compareAndSet(this, UNCANCELLABLE, objResult)) {
             if (checkNotifyWaiters()) {
+                // 监听通知
                 notifyListeners();
             }
             return true;
@@ -624,6 +639,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * @return {@code true} if there are any listeners attached to the promise, {@code false} otherwise.
      */
     private synchronized boolean checkNotifyWaiters() {
+        // 有阻塞等待的话，需要唤醒
         if (waiters > 0) {
             notifyAll();
         }
@@ -631,6 +647,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     }
 
     private void incWaiters() {
+        // 阻塞过多
         if (waiters == Short.MAX_VALUE) {
             throw new IllegalStateException("too many waiters: " + this);
         }
@@ -821,6 +838,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         }
     }
 
+    //需要有异常持有CauseHolder，且里面异常类型是CancellationException才算是取消，否则可能只是其他的失败异常。
     private static boolean isCancelled0(Object result) {
         return result instanceof CauseHolder && ((CauseHolder) result).cause instanceof CancellationException;
     }

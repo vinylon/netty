@@ -99,6 +99,7 @@ public class UnpooledDirectByteBuf extends AbstractReferenceCountedByteBuf {
 
     /**
      * Allocate a new direct {@link ByteBuffer} with the given initialCapacity.
+     * 申请直接缓冲区
      */
     protected ByteBuffer allocateDirect(int initialCapacity) {
         return ByteBuffer.allocateDirect(initialCapacity);
@@ -411,6 +412,7 @@ public class UnpooledDirectByteBuf extends AbstractReferenceCountedByteBuf {
 
     @Override
     protected void _setIntLE(int index, int value) {
+        // swapInt 字节序转换
         buffer.putInt(index, ByteBufUtil.swapInt(value));
     }
 

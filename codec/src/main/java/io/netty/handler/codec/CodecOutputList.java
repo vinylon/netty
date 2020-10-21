@@ -35,6 +35,7 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
         }
     };
 
+    //线程本地变量
     private static final FastThreadLocal<CodecOutputLists> CODEC_OUTPUT_LISTS_POOL =
             new FastThreadLocal<CodecOutputLists>() {
                 @Override
@@ -50,13 +51,18 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
 
     private static final class CodecOutputLists implements CodecOutputListRecycler {
         private final CodecOutputList[] elements;
+        //取余掩码
         private final int mask;
 
+        //当前索引
         private int currentIdx;
+        //列表个数
         private int count;
 
         CodecOutputLists(int numElements) {
+            //创建2的幂次个列表
             elements = new CodecOutputList[MathUtil.safeFindNextPositivePowerOfTwo(numElements)];
+            //初始化
             for (int i = 0; i < elements.length; ++i) {
                 // Size of 16 should be good enough for the majority of all users as an initial capacity.
                 elements[i] = new CodecOutputList(this, 16);
@@ -66,6 +72,7 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
             mask = elements.length - 1;
         }
 
+        //如果没缓存就创建一个不缓存的，默认创建长度为4的数组
         public CodecOutputList getOrCreate() {
             if (count == 0) {
                 // Return a new CodecOutputList which will not be cached. We use a size of 4 to keep the overhead
@@ -74,29 +81,37 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
             }
             --count;
 
+            //从后往前取，取模，算出索引位置
             int idx = (currentIdx - 1) & mask;
             CodecOutputList list = elements[idx];
             currentIdx = idx;
             return list;
         }
 
+        //回收CodecOutputList
         @Override
         public void recycle(CodecOutputList codecOutputList) {
             int idx = currentIdx;
             elements[idx] = codecOutputList;
+            //当前索引增加，取模
             currentIdx = (idx + 1) & mask;
             ++count;
             assert count <= elements.length;
         }
     }
 
+    //从线程本地变量的CodecOutputLists里获取的
     static CodecOutputList newInstance() {
         return CODEC_OUTPUT_LISTS_POOL.get().getOrCreate();
     }
 
+    //回收器
     private final CodecOutputListRecycler recycler;
+    //拥有的对象个数
     private int size;
+    //对象数组
     private Object[] array;
+    //是否有对象加入数组过
     private boolean insertSinceRecycled;
 
     private CodecOutputList(CodecOutputListRecycler recycler, int size) {
@@ -119,10 +134,13 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
     public boolean add(Object element) {
         checkNotNull(element, "element");
         try {
+            //插入
             insert(size, element);
         } catch (IndexOutOfBoundsException ignore) {
             // This should happen very infrequently so we just catch the exception and try again.
+            //扩容
             expandArray();
+            // 插入
             insert(size, element);
         }
         ++ size;
@@ -145,10 +163,12 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
         checkIndex(index);
 
         if (size == array.length) {
+            //扩容
             expandArray();
         }
 
         if (index != size) {
+            //拷贝指定位置以及之后的对象，就是向后移动数组
             System.arraycopy(array, index, array, index + 1, size - index);
         }
 
@@ -163,8 +183,10 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
 
         int len = size - index - 1;
         if (len > 0) {
+            //向前移动数组
             System.arraycopy(array, index + 1, array, index, len);
         }
+        //最后位置清空
         array[-- size] = null;
 
         return old;
@@ -174,6 +196,7 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
     public void clear() {
         // We only set the size to 0 and not null out the array. Null out the array will explicit requested by
         // calling recycle()
+        // 只是把个数清空了 真正删除元素是在recycle中
         size = 0;
     }
 
@@ -186,6 +209,7 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
 
     /**
      * Recycle the array which will clear it and null out all entries in the internal storage.
+     * 清空对象并回收到CodecOutputLists中
      */
     void recycle() {
         for (int i = 0 ; i < size; i ++) {
@@ -211,16 +235,20 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
         }
     }
 
+    //放入数组
     private void insert(int index, Object element) {
         array[index] = element;
+        //有放入过了
         insertSinceRecycled = true;
     }
 
+    //扩容，每次2倍，直到溢出位置
     private void expandArray() {
         // double capacity
         int newCapacity = array.length << 1;
 
         if (newCapacity < 0) {
+            //溢出了
             throw new OutOfMemoryError();
         }
 

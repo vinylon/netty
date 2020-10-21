@@ -23,6 +23,7 @@ import io.netty.util.internal.UnstableApi;
  */
 public class FastThreadLocalThread extends Thread {
     // This will be set to true if we have a chance to wrap the Runnable.
+    //是否对Runnable包装成FastThreadLocalRunnable
     private final boolean cleanupFastThreadLocals;
 
     private InternalThreadLocalMap threadLocalMap;
@@ -92,6 +93,7 @@ public class FastThreadLocalThread extends Thread {
 
     /**
      * Returns {@code true} if {@link FastThreadLocal#removeAll()} will be called once {@link Thread#run()} completes.
+     * 是否在任务完成时会进行removeAll
      */
     @UnstableApi
     public static boolean willCleanupFastThreadLocals(Thread thread) {

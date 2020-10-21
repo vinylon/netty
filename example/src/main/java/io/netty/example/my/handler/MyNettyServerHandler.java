@@ -1,25 +1,16 @@
 package io.netty.example.my.handler;
 
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
 
 /**
  * @author mawei
  * @date 2020/10/10
  */
-public class MyNettyServerHandler implements ChannelHandler {
-    @Override
-    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-        System.out.println("MyNettyServerHandler.handlerAdded");
-    }
+public class MyNettyServerHandler extends SimpleChannelInboundHandler<String> {
 
     @Override
-    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        System.out.println("MyNettyServerHandler.handlerRemoved");
-    }
-
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        System.out.println("MyNettyServerHandler.exceptionCaught");
+    protected void channelRead0(ChannelHandlerContext ctx, String msg) throws Exception {
+        System.out.println("my hanlder on read,message:" + msg);
     }
 }

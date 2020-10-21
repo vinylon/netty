@@ -21,6 +21,7 @@ import io.netty.handler.codec.DecoderResultProvider;
 public interface HttpObject extends DecoderResultProvider {
     /**
      * @deprecated Use {@link #decoderResult()} instead.
+     * 获得解码结果
      */
     @Deprecated
     DecoderResult getDecoderResult();

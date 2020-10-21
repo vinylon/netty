@@ -211,30 +211,35 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
         /**
          * Return the assigned {@link RecvByteBufAllocator.Handle} which will be used to allocate {@link ByteBuf}'s when
          * receiving data.
+         * // 接受数据的时候用于分配字节缓冲区的处理器
          */
         RecvByteBufAllocator.Handle recvBufAllocHandle();
 
         /**
          * Return the {@link SocketAddress} to which is bound local or
          * {@code null} if none.
+         *   // 本地地址
          */
         SocketAddress localAddress();
 
         /**
          * Return the {@link SocketAddress} to which is bound remote or
          * {@code null} if none is bound yet.
+         * // 远程地址
          */
         SocketAddress remoteAddress();
 
         /**
          * Register the {@link Channel} of the {@link ChannelPromise} and notify
          * the {@link ChannelFuture} once the registration was complete.
+         *  //向事件循环注册通道，完成后回调
          */
         void register(EventLoop eventLoop, ChannelPromise promise);
 
         /**
          * Bind the {@link SocketAddress} to the {@link Channel} of the {@link ChannelPromise} and notify
          * it once its done.
+         *  // 绑定本地地址，完成后回调
          */
         void bind(SocketAddress localAddress, ChannelPromise promise);
 
@@ -244,46 +249,54 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
          * pass {@code null} to it.
          *
          * The {@link ChannelPromise} will get notified once the connect operation was complete.
+         * // 连接
          */
         void connect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise);
 
         /**
          * Disconnect the {@link Channel} of the {@link ChannelFuture} and notify the {@link ChannelPromise} once the
          * operation was complete.
+         * // 断开连接，完成回调
          */
         void disconnect(ChannelPromise promise);
 
         /**
          * Close the {@link Channel} of the {@link ChannelPromise} and notify the {@link ChannelPromise} once the
          * operation was complete.
+         *  // 关闭连接，完成回调
          */
         void close(ChannelPromise promise);
 
         /**
          * Closes the {@link Channel} immediately without firing any events.  Probably only useful
          * when registration attempt failed.
+         *  // 立即关闭，不触发任何事件
          */
         void closeForcibly();
 
         /**
          * Deregister the {@link Channel} of the {@link ChannelPromise} from {@link EventLoop} and notify the
          * {@link ChannelPromise} once the operation was complete.
+         *   // 注销，完成回调
          */
         void deregister(ChannelPromise promise);
 
         /**
          * Schedules a read operation that fills the inbound buffer of the first {@link ChannelInboundHandler} in the
          * {@link ChannelPipeline}.  If there's already a pending read operation, this method does nothing.
+         *   // 开始读操作
          */
         void beginRead();
 
         /**
          * Schedules a write operation.
+         *  // 写操作
          */
         void write(Object msg, ChannelPromise promise);
 
         /**
          * Flush out all write operations scheduled via {@link #write(Object, ChannelPromise)}.
+         *  // 冲刷所有的出站数据
          */
         void flush();
 
@@ -291,11 +304,13 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
          * Return a special ChannelPromise which can be reused and passed to the operations in {@link Unsafe}.
          * It will never be notified of a success or error and so is only a placeholder for operations
          * that take a {@link ChannelPromise} as argument but for which you not want to get notified.
+         *   // 特殊的占位符，不接受通知
          */
         ChannelPromise voidPromise();
 
         /**
          * Returns the {@link ChannelOutboundBuffer} of the {@link Channel} where the pending write requests are stored.
+         *  //写操作的出站缓冲区
          */
         ChannelOutboundBuffer outboundBuffer();
     }

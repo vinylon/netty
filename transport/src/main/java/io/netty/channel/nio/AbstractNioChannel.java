@@ -78,9 +78,12 @@ public abstract class AbstractNioChannel extends AbstractChannel {
      */
     protected AbstractNioChannel(Channel parent, SelectableChannel ch, int readInterestOp) {
         super(parent);
+        //设置ServerSocketChannel实例ServerSocketChannelImpl
         this.ch = ch;
+        //设置事件OP_ACCEPT
         this.readInterestOp = readInterestOp;
         try {
+            //设置非阻塞
             ch.configureBlocking(false);
         } catch (IOException e) {
             try {
@@ -211,6 +214,9 @@ public abstract class AbstractNioChannel extends AbstractChannel {
 
     protected abstract class AbstractNioUnsafe extends AbstractUnsafe implements NioUnsafe {
 
+        //清除读监听
+        //如果发现有读监听就删除了，用的是位操作。
+        // 什么时候会进行读的清除呢，一般是设置自动读的，所以不会清除读监听，而且默认NioSocketChannel是监听读的
         protected final void removeReadOp() {
             SelectionKey key = selectionKey();
             // Check first if the key is still valid as it may be canceled as part of the deregistration
@@ -226,11 +232,15 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             }
         }
 
+        // 原生channel
         @Override
         public final SelectableChannel ch() {
             return javaChannel();
         }
 
+        //建立连接
+        //如果doConnect能连接上，就处理回调fulfillConnectPromise，
+        // 否则如果有设置超时的话就提交超时调度任务，如果连接上了，就把超时任务取消。
         @Override
         public final void connect(
                 final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) {
@@ -286,6 +296,8 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             }
         }
 
+        //实现连接回调
+        //如果前面通道没激活，现在激活了，就传递激活事件
         private void fulfillConnectPromise(ChannelPromise promise, boolean wasActive) {
             if (promise == null) {
                 // Closed via cancellation and the promise has been notified already.
@@ -297,20 +309,24 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             boolean active = isActive();
 
             // trySuccess() will return false if a user cancelled the connection attempt.
+            //尝试成功回调
             boolean promiseSet = promise.trySuccess();
 
             // Regardless if the connection attempt was cancelled, channelActive() event should be triggered,
             // because what happened is what happened.
+            //前面没激活，现在激活了
             if (!wasActive && active) {
                 pipeline().fireChannelActive();
             }
 
             // If a user cancelled the connection attempt, close the channel, which is followed by channelInactive().
+            //失败就关闭
             if (!promiseSet) {
                 close(voidPromise());
             }
         }
 
+        // 失败的回调 附带异常的
         private void fulfillConnectPromise(ChannelPromise promise, Throwable cause) {
             if (promise == null) {
                 // Closed via cancellation and the promise has been notified already.
@@ -322,6 +338,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             closeIfClosed();
         }
 
+        //连接完成了，不管是否成功都要回调，要处理。
         @Override
         public final void finishConnect() {
             // Note this method is invoked by the event loop only if the connection attempt was
@@ -345,23 +362,28 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             }
         }
 
+        //发送数据 如果没有待发的就发出去，否则要留给待发的。
         @Override
         protected final void flush0() {
             // Flush immediately only when there's no pending flush.
             // If there's a pending flush operation, event loop will call forceFlush() later,
             // and thus there's no need to call it now.
+            //没有待冲刷的操作
             if (!isFlushPending()) {
                 super.flush0();
             }
         }
 
+        //强制发送数据
         @Override
         public final void forceFlush() {
             // directly call super.flush0() to force a flush now
             super.flush0();
         }
 
+        //是否有待发送的数据
         private boolean isFlushPending() {
+            // 先判断下是否已经有待冲刷存在，也就是有设置OP_WRITE事件
             SelectionKey selectionKey = selectionKey();
             return selectionKey.isValid() && (selectionKey.interestOps() & SelectionKey.OP_WRITE) != 0;
         }
@@ -401,6 +423,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
 
     @Override
     protected void doBeginRead() throws Exception {
+        // 初始化的时候事件循环执行的最后一个任务，其实就是设置相应的监听事件，当然可以监听读写事件
         // Channel.read() or ChannelHandlerContext.read() was called
         final SelectionKey selectionKey = this.selectionKey;
         if (!selectionKey.isValid()) {
@@ -432,19 +455,27 @@ public abstract class AbstractNioChannel extends AbstractChannel {
      */
     protected final ByteBuf newDirectBuffer(ByteBuf buf) {
         final int readableBytes = buf.readableBytes();
+        //如果没有数据，就释放，返回一个空的
         if (readableBytes == 0) {
             ReferenceCountUtil.safeRelease(buf);
             return Unpooled.EMPTY_BUFFER;
         }
 
+        //字节缓冲区分配器
         final ByteBufAllocator alloc = alloc();
+        //是直接缓冲区池化的
         if (alloc.isDirectBufferPooled()) {
+            //申请直接缓冲区
             ByteBuf directBuf = alloc.directBuffer(readableBytes);
+            //写入直接缓冲区
             directBuf.writeBytes(buf, buf.readerIndex(), readableBytes);
+            //释放原来的缓冲区
             ReferenceCountUtil.safeRelease(buf);
+            //返回直接缓冲区
             return directBuf;
         }
 
+        //线程中的直接缓冲区
         final ByteBuf directBuf = ByteBufUtil.threadLocalDirectBuffer();
         if (directBuf != null) {
             directBuf.writeBytes(buf, buf.readerIndex(), readableBytes);
@@ -453,6 +484,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         }
 
         // Allocating and deallocating an unpooled direct buffer is very expensive; give up.
+        //如果申请或者释放未池化的直接缓冲区消耗太大，就直接返回原来的
         return buf;
     }
 

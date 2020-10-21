@@ -19,11 +19,13 @@ import java.nio.ByteBuffer;
 
 /**
  * Allows to free direct {@link ByteBuffer}s.
+ * 清除器
  */
 interface Cleaner {
 
     /**
      * Free a direct {@link ByteBuffer} if possible
+     * 直接缓冲区的释放方法
      */
     void freeDirectBuffer(ByteBuffer buffer);
 }

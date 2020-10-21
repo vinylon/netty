@@ -19,6 +19,10 @@ import io.netty.util.internal.PlatformDependent;
 
 import java.nio.ByteBuffer;
 
+/**
+ * 没有清除器
+ * jdk 9以上需设置-Dio.netty.tryReflectionSetAccessible=true开启
+ */
 class UnpooledUnsafeNoCleanerDirectByteBuf extends UnpooledUnsafeDirectByteBuf {
 
     UnpooledUnsafeNoCleanerDirectByteBuf(ByteBufAllocator alloc, int initialCapacity, int maxCapacity) {
@@ -30,10 +34,12 @@ class UnpooledUnsafeNoCleanerDirectByteBuf extends UnpooledUnsafeDirectByteBuf {
         return PlatformDependent.allocateDirectNoCleaner(initialCapacity);
     }
 
+    //申请没有清除器的直接缓冲区
     ByteBuffer reallocateDirect(ByteBuffer oldBuffer, int initialCapacity) {
         return PlatformDependent.reallocateDirectNoCleaner(oldBuffer, initialCapacity);
     }
 
+    //释放没有清除器的直接缓冲区
     @Override
     protected void freeDirect(ByteBuffer buffer) {
         PlatformDependent.freeDirectNoCleaner(buffer);

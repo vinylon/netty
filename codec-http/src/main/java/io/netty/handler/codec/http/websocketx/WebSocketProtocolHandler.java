@@ -65,14 +65,17 @@ abstract class WebSocketProtocolHandler extends MessageToMessageDecoder<WebSocke
         this.forceCloseTimeoutMillis = forceCloseTimeoutMillis;
     }
 
+    //如果是心跳ping，pong帧的就响应，然后继续监听读消息，否则就将数据帧加进消息列表中
     @Override
     protected void decode(ChannelHandlerContext ctx, WebSocketFrame frame, List<Object> out) throws Exception {
+        //ping帧，写回pong，继续监听读事件，直接返回
         if (frame instanceof PingWebSocketFrame) {
             frame.content().retain();
             ctx.channel().writeAndFlush(new PongWebSocketFrame(frame.content()));
             readIfNeeded(ctx);
             return;
         }
+        //丢弃pong帧
         if (frame instanceof PongWebSocketFrame && dropPongFrames) {
             readIfNeeded(ctx);
             return;
